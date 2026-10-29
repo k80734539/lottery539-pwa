@@ -1,5 +1,6 @@
 import * as L from './logic.js';
 import * as S from './store.js';
+import * as A from './arena.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -12,6 +13,8 @@ let btResult = null; // 歷史回測（僅記憶體）
 let drawsShown = 40;
 let drawsQuery = '';
 let syncState = { status: 'idle', msg: '' };
+let arenaTab = 'today';
+let arenaBt = null; // 擂台歷史回測（僅記憶體）
 
 const NOTICE = `<div class="card notice"><b>請先讀這段：</b>開獎是彼此獨立的隨機事件，<b>沒有任何選號方法能提高中獎機率</b>。本 App 只負責<b>紀錄、對獎與花費管理</b>，不是預測工具，也不含任何「AI 預測」。長期買彩券的期望值是負的，請只用玩樂預算。</div>`;
 
@@ -36,7 +39,8 @@ async function sync(manual = false) {
   syncState = { status: 'loading', msg: '同步中…' };
   if (tab === 'draws') render();
   try {
-    const r = await fetch('data/results.json?t=' + Date.now(), { cache: 'no-store' });
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch('data/results.json?t=' + Date.now(), { cache: 'no-store', signal: ctl.signal }); clearTimeout(to);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     if (r.headers.get('x-from-cache')) throw new Error('offline');
     const j = await r.json();
@@ -50,6 +54,7 @@ async function sync(manual = false) {
     syncState = { status: 'fail', msg: '無法取得最新開獎（離線或來源異常），改用手機內已存的資料；也可手動輸入開獎號碼。' };
     if (manual) toast('同步失敗，使用已存資料');
   }
+  await ensureArena();
   render();
 }
 
@@ -319,6 +324,84 @@ function onStatsClick(e) {
   setTimeout(() => { btResult = L.backtest(drawChrono, rng); render(); }, 30);
 }
 
+
+// ---------- 策略擂台 ----------
+let arenaBusy = false;
+/** 為「下一期」自動建立（並鎖定）每個策略的 4 碼選號；已有就不動。 */
+async function ensureArena() {
+  if (arenaBusy) return; arenaBusy = true;
+  try {
+    const date = L.nextDrawDate();
+    if (!S.state.arena.entries.some(e => e.drawDate === date)) {
+      const e = await A.makeEntry(date, drawChrono);
+      // 以 nextDrawDate 產生者必然早於 20:30；再檢查一次避免時鐘邊界
+      if (A.entryCounts(e)) { S.state.arena.entries.push(e); S.save(); }
+    }
+  } finally { arenaBusy = false; }
+}
+function arenaSettled() { return A.settleEntries(S.state.arena.entries, drawMap); }
+function fmtP(p) { return p === null || p === undefined ? '—' : p < 0.001 ? '<0.001' : p.toFixed(3); }
+function arenaDistTable(ev, { showTheory = null, forward = false } = {}) {
+  const rows = [...ev.rows].sort((a, b) => b.mean - a.mean);
+  const body = rows.map(r => `<tr class="${r.id === 'random' ? 'base' : ''}${r.sig ? ' sig' : ''}"><td class="sname">${A.nameOf(r.id)}${r.better ? ' ⭐' : ''}</td><td>${r.mean.toFixed(3)}</td><td>${r.lo.toFixed(3)}~${r.hi.toFixed(3)}</td>${forward ? `<td>${r.n}</td>` : r.dist.map(c => `<td>${c}</td>`).join('')}<td>${r.adjMin === null ? '—' : r.z.toFixed(2)}</td><td>${fmtP(r.adjMin)}</td></tr>`).join('');
+  const head = `<tr><th>策略</th><th>平均命中</th><th>95%區間</th>${forward ? '<th>期數</th>' : '<th>0顆</th><th>1顆</th><th>2顆</th><th>3顆</th><th>4顆</th>'}<th>z</th><th>校正p</th></tr>`;
+  const theory = showTheory ? `<tr class="base"><td><b>理論隨機</b></td><td>${A.MEAN4.toFixed(3)}</td><td>—</td>${forward ? '<td>—</td>' : A.P4.map(p => `<td>${(p * showTheory).toFixed(1)}</td>`).join('')}<td>0</td><td>—</td></tr>` : `<tr class="base"><td><b>理論隨機</b></td><td>${A.MEAN4.toFixed(3)}</td><td>—</td><td>—</td><td>0</td><td>—</td></tr>`;
+  return `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body}${theory}</tbody></table></div>`;
+}
+function renderArena() {
+  const seg = `<div class="seg" role="tablist">${[['today', '今日選號'], ['live', '即時排行'], ['bt', '歷史回測']].map(([k, n]) => `<button data-aseg="${k}" aria-pressed="${arenaTab === k}">${n}</button>`).join('')}</div>`;
+  const intro = `<div class="card"><h2>🏟️ 策略擂台</h2><div class="small-print" style="font-size:13px">每期每個策略自動選 <b>4 碼</b>（模擬、不花錢），開獎後自動算命中顆數（4 碼中了幾顆開獎號碼），看誰命中最多。<b>純隨機 4 碼的理論平均命中是 20/39 ≈ ${A.MEAN4.toFixed(4)} 顆</b>；任何策略要算「真的比較好」，必須在多重比較校正後顯著高於它。</div></div>`;
+  let body = '';
+  if (arenaTab === 'today') {
+    const date = L.nextDrawDate();
+    const e = S.state.arena.entries.find(x => x.drawDate === date);
+    body = e ? `<div class="card"><div class="row between"><h2 style="margin:0">${fmtDate(date)} 的 12 組</h2><span class="tag ok">已自動鎖定</span></div>
+      <div class="small-print">鎖定於 ${new Date(e.lockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間）・指紋 <code>${e.fp}</code>・使用到 ${e.histLast || '—'} 為止的 ${e.histCount} 期資料（只看過去）</div>
+      ${A.ARENA.map(s => `<div class="pickcard"><div class="row between"><span><span class="sname">${s.name}</span> <span class="tag ${s.kind === 'baseline' ? '' : 'ok'}">${s.kind === 'baseline' ? '基準' : '新'}</span></span><button class="small" data-act="acopy" data-id="${s.id}">📋 複製</button></div>
+        <div class="small-print">${s.desc}</div>${balls(e.picks[s.id], { small: true })}</div>`).join('')}</div>` : '<div class="card muted">正在建立今天的選號…</div>';
+    body += `<p class="small-print">每個策略的選號由「開獎日＋策略名」決定亂數種子，同一份歷史資料一定產生同一組，並在開獎日 20:30（台灣時間）前記錄鎖定。若某天沒打開 App，就沒有那天的即時紀錄（不會事後補，以免作弊）；歷史則由回測涵蓋。</p>`;
+  } else if (arenaTab === 'live') {
+    const { dist, settled } = arenaSettled();
+    const ev = A.evaluateAll(dist, 30);
+    const verdict = A.verdictText(ev);
+    const pending = S.state.arena.entries.filter(e => A.entryCounts(e) && !drawMap.get(e.drawDate)).length;
+    body = `<div class="card"><h2>即時排行（前向追蹤）</h2>
+      <div class="small-print">已累積 <b>${settled.length}</b> 期已開獎的紀錄${pending ? `，另有 ${pending} 期等待開獎` : ''}。排名只依平均命中排序，但樣本小時名次幾乎全是運氣；每個策略累積滿 30 期之前不做顯著性檢定。</div>
+      ${settled.length ? arenaDistTable(ev, { forward: true }) : '<div class="alert info">還沒有已開獎的即時紀錄。App 會自動在每個開獎日前記錄選號，開獎後自動結算，也可以到「開獎」頁手動輸入結果。</div>'}
+      ${settled.length ? `<div class="alert ${verdict.kind === 'diff' ? 'warn' : 'info'}">${verdict.text}</div>` : ''}
+      <div class="small-print">95% 區間為平均命中的信賴區間；校正 p 為 Holm 多重比較校正後的最小 p 值（z 檢定與卡方）。理論隨機基準 ${A.MEAN4.toFixed(4)} 若落在區間內，就看不出差異。</div></div>
+      ${settled.length ? `<div class="card"><h2>最近一期（${fmtDate(settled[0].date)}）</h2><div class="row" style="margin-bottom:6px"><span class="small-print">開獎</span>${balls(settled[0].draw.numbers, { small: true, draw: true })}</div>
+      ${A.ARENA.map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${settled[0].hits[s.id] >= 2 ? 'ok' : ''}">中 ${settled[0].hits[s.id]} 顆</span></div>${balls(settled[0].picks[s.id], { small: true, hit: settled[0].picks[s.id].filter(n => settled[0].draw.numbers.includes(n)) })}</div>`).join('')}</div>` : ''}`;
+  } else {
+    if (!arenaBt) {
+      body = `<div class="card"><h2>歷史回測（walk-forward）</h2><div class="small-print">對全部 ${drawChrono.length.toLocaleString()} 期歷史逐期往前走：每一期都只用「該期以前」的資料讓每個策略選 4 碼，再和該期實際開獎比。前 ${A.WARMUP} 期當暖身不計分。</div>
+        <div class="row" style="margin-top:8px"><button class="primary grow" data-act="abt">▶ 執行回測</button></div></div>`;
+    } else {
+      const ev = A.evaluateAll(arenaBt.dist);
+      const verdict = A.verdictText(ev);
+      body = `<div class="card"><h2>歷史回測結果</h2>
+        <div class="small-print">${arenaBt.from} ～ ${arenaBt.to}，共評估 <b>${arenaBt.evaluated.toLocaleString()}</b> 期（總 ${arenaBt.total.toLocaleString()} 期，前 ${arenaBt.warm} 期暖身）。每期每策略 4 碼。</div>
+        ${arenaDistTable(ev, { showTheory: arenaBt.evaluated })}
+        <div class="alert ${verdict.kind === 'diff' ? 'warn' : 'info'}">${verdict.text}</div>
+        <div class="small-print">表中 0–4 顆為該策略各命中顆數的期數；「理論隨機」列為期望次數。z 為平均命中相對 ${A.MEAN4.toFixed(4)} 的標準分數；校正 p 為對 ${ev.m} 項檢定（${ev.rows.length} 策略 × z 檢定＋卡方）做 Holm 校正後的最小 p 值，&lt;0.05 才算顯著。在這個樣本數與校正下，只有平均命中差距超過約 ±${ev.detect.toFixed(3)} 顆（約 ${(ev.detect / A.MEAN4 * 100).toFixed(0)}%）才有 80% 機會被偵測到。${ev.rows.some(r => r.pZ < 0.05 || (r.pChi !== null && r.pChi < 0.05)) ? '<br>⚠️ 有策略的「未校正」p 值低於 0.05，但這是同時測很多個策略時預期會出現的偶然（假陽性），校正後就不顯著了。' : ''}</div></div>
+        <div class="card"><div class="row"><button class="grow" data-act="abt">🔄 重新計算（結果相同，可重現）</button></div></div>`;
+    }
+  }
+  view.innerHTML = `${NOTICE}${intro}${seg}${body}`;
+}
+function onArenaClick(e) {
+  const seg = e.target.closest('[data-aseg]');
+  if (seg) { arenaTab = seg.dataset.aseg; render(); return; }
+  const t = e.target.closest('[data-act]'); if (!t) return;
+  if (t.dataset.act === 'abt') {
+    t.disabled = true; t.textContent = '計算中…';
+    setTimeout(() => { arenaBt = A.backtestArena(drawChrono); render(); }, 30);
+  } else if (t.dataset.act === 'acopy') {
+    const en = S.state.arena.entries.find(x => x.drawDate === L.nextDrawDate());
+    if (en) copyText(L.fmtNums(en.picks[t.dataset.id]));
+  }
+}
+
 // ---------- 開獎 ----------
 function numberHeat() {
   const recent = drawChrono.slice(-100);
@@ -426,7 +509,7 @@ function applyTheme() {
 }
 function render() {
   document.querySelectorAll('#tabs button').forEach(b => { if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
-  ({ today: renderToday, records: renderRecords, stats: renderStats, draws: renderDraws, settings: renderSettings })[tab]();
+  ({ today: renderToday, records: renderRecords, stats: renderStats, arena: renderArena, draws: renderDraws, settings: renderSettings })[tab]();
   $('#clock').textContent = '台灣時間 ' + new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit' });
 }
 function go(t) { tab = t; window.scrollTo(0, 0); render(); }
@@ -435,6 +518,7 @@ view.addEventListener('click', e => {
   if (tab === 'today') onTodayClick(e);
   else if (tab === 'records') onRecordsClick(e);
   else if (tab === 'stats') onStatsClick(e);
+  else if (tab === 'arena') onArenaClick(e);
   else if (tab === 'draws') onDrawsClick(e);
   else if (tab === 'settings') onSettingsClick(e);
 });
@@ -445,12 +529,12 @@ $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeS
 let lastNext = null;
 setInterval(() => {
   const n = L.nextDrawDate();
-  if (lastNext && n !== lastNext && tab === 'today') render(); else tickCountdown();
+  if (lastNext && n !== lastNext) { ensureArena().then(() => { if (tab === 'today' || tab === 'arena') render(); }); } else tickCountdown();
   lastNext = n;
   $('#clock').textContent = '台灣時間 ' + new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit' });
 }, 15000);
 window.addEventListener('online', () => sync(false));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { rebuild(); if (tab !== 'draws') render(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { rebuild(); ensureArena().then(() => { if (tab !== 'draws') render(); }); } });
 
 window.addEventListener('error', e => console.error('app error', e.message));
 (async function init() {
@@ -460,5 +544,5 @@ window.addEventListener('error', e => console.error('app error', e.message));
   render();
   try { navigator.storage?.persist?.(); } catch {}
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-  sync(false);
+  sync(false); // 同步完成後才建立擂台選號（確保用到最新開獎資料）
 })();

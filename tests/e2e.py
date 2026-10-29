@@ -2,7 +2,8 @@
 import json, sys
 from playwright.sync_api import sync_playwright
 
-BASE = 'http://localhost:50065/'
+import os
+BASE = os.environ.get('BASE', 'http://localhost:50065/')
 errors = []
 def check(c, msg):
     print(('PASS ' if c else 'FAIL ') + msg)
