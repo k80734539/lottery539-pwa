@@ -14,7 +14,7 @@
 - 資料存在 localStorage，可匯出／匯入；離線可用（service worker）、淺色／深色、safe-area
 
 ## 開獎資料更新
-`.github/workflows/update-results.yml` 在週一至週六台灣時間 21:35（及 22:30、23:45、隔日 08:10 備援）執行
+`.github/workflows/update-results.yml`（目前放在 `workflow-template/update-results.yml`，因為推送用的 token 沒有 `workflow` 權限，需複製到 `.github/workflows/` 才會生效）在週一至週六台灣時間 21:35（及 22:30、23:45、隔日 08:10 備援）執行
 `scripts/update_results.py`，向 `https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Daily539Result`（官網內部端點，非正式公開 API）抓取，
 更新 `data/results.json` 並 commit。App 啟動時讀取該檔；失敗會使用手機內已存資料，並可手動輸入開獎號碼。
 
