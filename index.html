@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#12141a" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="539記帳本">
+<title>今彩539 記帳本</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top"><h1>今彩539 記帳本</h1><span id="clock" class="muted"></span></header>
+<main id="view" aria-live="polite"></main>
+<nav class="tabs" id="tabs" aria-label="主選單">
+  <button data-tab="today">🎯<span>選號</span></button>
+  <button data-tab="records">🧾<span>紀錄</span></button>
+  <button data-tab="stats">📊<span>統計</span></button>
+  <button data-tab="draws">🔢<span>開獎</span></button>
+  <button data-tab="settings">⚙️<span>設定</span></button>
+</nav>
+<div id="sheet" class="sheet" hidden></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<noscript>需要啟用 JavaScript。</noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
