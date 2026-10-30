@@ -370,8 +370,8 @@ function renderArena() {
       ${settled.length ? arenaDistTable(ev, { forward: true }) : '<div class="alert info">還沒有已開獎的即時紀錄。App 會自動在每個開獎日前記錄選號，開獎後自動結算，也可以到「開獎」頁手動輸入結果。</div>'}
       ${settled.length ? `<div class="alert ${verdict.kind === 'diff' ? 'warn' : 'info'}">${verdict.text}</div>` : ''}
       <div class="small-print">95% 區間為平均命中的信賴區間；校正 p 為 Holm 多重比較校正後的最小 p 值（z 檢定與卡方）。理論隨機基準 ${A.MEAN4.toFixed(4)} 若落在區間內，就看不出差異。</div></div>
-      ${settled.length ? `<div class="card"><h2>最近一期（${fmtDate(settled[0].date)}）</h2><div class="row" style="margin-bottom:6px"><span class="small-print">開獎</span>${balls(settled[0].draw.numbers, { small: true, draw: true })}</div>
-      ${A.ARENA.map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${settled[0].hits[s.id] >= 2 ? 'ok' : ''}">中 ${settled[0].hits[s.id]} 顆</span></div>${balls(settled[0].picks[s.id], { small: true, hit: settled[0].picks[s.id].filter(n => settled[0].draw.numbers.includes(n)) })}</div>`).join('')}</div>` : ''}`;
+      ${settled.slice(0, 60).map((st, i) => `<details class="card"${i === 0 ? ' open' : ''}><summary><b>${fmtDate(st.date)}</b>${i === 0 ? '（最近一期）' : ''} <span class="small-print">最佳 ${Math.max(...A.ARENA.map(s => st.hits[s.id]))} 顆</span></summary><div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(st.draw.numbers, { small: true, draw: true })}</div>
+      ${A.ARENA.map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${st.hits[s.id] >= 2 ? 'ok' : ''}">中 ${st.hits[s.id]} 顆</span></div>${balls(st.picks[s.id], { small: true, hit: st.picks[s.id].filter(n => st.draw.numbers.includes(n)) })}</div>`).join('')}</details>`).join('')}`;
   } else {
     if (!arenaBt) {
       body = `<div class="card"><h2>歷史回測（walk-forward）</h2><div class="small-print">對全部 ${drawChrono.length.toLocaleString()} 期歷史逐期往前走：每一期都只用「該期以前」的資料讓每個策略選 4 碼，再和該期實際開獎比。前 ${A.WARMUP} 期當暖身不計分。</div>
