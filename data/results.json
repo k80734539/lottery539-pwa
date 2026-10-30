@@ -1,9 +1,20 @@
 {
  "source": "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Daily539Result",
  "note": "官方內部端點資料；僅供紀錄對獎，請以台灣彩券公告為準。",
- "updated": "2026-10-30T03:07:20+08:00",
- "latestDate": "2026-10-29",
+ "updated": "2026-10-31T00:37:49+08:00",
+ "latestDate": "2026-10-30",
  "draws": [
+  {
+   "issue": "115263",
+   "date": "2026-10-30",
+   "numbers": [
+    9,
+    11,
+    12,
+    31,
+    37
+   ]
+  },
   {
    "issue": "115262",
    "date": "2026-10-29",
