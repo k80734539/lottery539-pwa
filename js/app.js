@@ -1,6 +1,7 @@
 import * as L from './logic.js';
 import * as S from './store.js';
 import * as A from './arena.js';
+import * as H from './lehe.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -402,6 +403,108 @@ function onArenaClick(e) {
   }
 }
 
+// ---------- 39樂合彩 ----------
+let leheDate = null;
+function LS() { return S.state.lehe.settings; }
+function leheSheet({ date, initial = [], plays = [2], bought = true, source = 'manual', title = '新增 39樂合彩' }) {
+  const sel = new Set(initial); const pl = new Set(plays);
+  const s = showSheet(`<h2>${title}</h2>
+    <label class="field">開獎日期<input type="date" id="lh-date" value="${date}"></label>
+    <div class="muted">選 2–${H.MAX_NUMS} 個號碼，已選 <b id="lh-n">0</b> 個</div>
+    <div class="picker">${Array.from({ length: 39 }, (_, i) => `<button type="button" data-n="${i + 1}" aria-pressed="false">${i + 1}</button>`).join('')}</div>
+    <div class="row">${H.PLAYS.map(k => `<label class="small-print"><input type="checkbox" data-play="${k}" ${pl.has(k) ? 'checked' : ''}> ${H.PLAY_NAME[k]}</label>`).join('')}
+      <label class="small-print"><input type="checkbox" id="lh-bought" ${bought ? 'checked' : ''}> 我有買</label></div>
+    <div class="small-print" id="lh-cost"></div>
+    <div class="row"><button class="grow" id="lh-cancel">取消</button><button class="grow primary" id="lh-save" disabled>🔒 儲存並鎖定</button></div>`);
+  const upd = () => {
+    s.querySelectorAll('.picker button').forEach(b => b.setAttribute('aria-pressed', sel.has(+b.dataset.n)));
+    const n = sel.size; s.querySelector('#lh-n').textContent = n;
+    const ps = [...pl].filter(k => k <= n).sort();
+    const tc = H.ticketCount([...sel], ps); const tot = Object.values(tc).reduce((a, b) => a + b, 0);
+    s.querySelector('#lh-cost').textContent = ps.length ? ps.map(k => `${H.PLAY_NAME[k]} ${tc[k]} 注`).join('、') + `，共 ${tot} 注 × NT$${LS().price} = ${L.money(tot * LS().price)}` : '請勾選至少一種玩法（號碼數要 ≥ 玩法碼數）';
+    s.querySelector('#lh-save').disabled = !(n >= 2 && ps.length);
+  };
+  s.querySelector('.picker').onclick = e => { const b = e.target.closest('button'); if (!b) return; const n = +b.dataset.n; if (sel.has(n)) sel.delete(n); else if (sel.size < H.MAX_NUMS) sel.add(n); upd(); };
+  s.querySelectorAll('[data-play]').forEach(c => (c.onchange = () => { const k = +c.dataset.play; c.checked ? pl.add(k) : pl.delete(k); upd(); }));
+  s.querySelector('#lh-cancel').onclick = closeSheet;
+  s.querySelector('#lh-save').onclick = () => {
+    const d = s.querySelector('#lh-date').value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return toast('請選日期');
+    if (!L.isDrawDay(d)) return toast('週日沒有開獎');
+    const nums = [...sel].sort((a, b) => a - b); const ps = [...pl].filter(k => k <= nums.length).sort();
+    const now = new Date();
+    S.state.lehe.entries.push({ id: now.getTime().toString(36) + Math.random().toString(36).slice(2, 6), drawDate: d, numbers: nums, plays: ps, bought: s.querySelector('#lh-bought').checked, source, createdAt: now.toISOString(), late: now >= L.cutoffInstant(d) });
+    S.save(); closeSheet(); toast('已儲存'); render();
+  };
+  upd();
+}
+function leheEntryCard(e) {
+  const d = drawMap.get(e.drawDate); const r = H.settle(e, d, LS());
+  const name = e.source === 'manual' ? '自選' : '擂台：' + A.nameOf(e.source);
+  const tag = r ? (r.win > 0 ? `<span class="tag ok">中獎 ${L.money(r.win)}</span>` : (e.bought === false && Object.values(r.byPlay).some(p => p.hits) ? '<span class="tag ok">有對中（沒買）</span>' : '<span class="tag">已對獎</span>')) : '<span class="tag warn">等開獎</span>';
+  const plays = e.plays.map(k => {
+    const p = r?.byPlay[k];
+    return `<div class="small-print">${H.PLAY_NAME[k]} ${H.C(e.numbers.length, k)} 注${p ? `：<b>中 ${p.hits} 注</b>${p.hits ? '（' + p.hitCombos.map(c => L.fmtNums(c)).join('、') + '）' : ''}${p.win ? ' ・' + L.money(p.win) : ''}` : ''}</div>`;
+  }).join('');
+  return `<div class="card"><div class="row between"><b>${fmtDate(e.drawDate)}</b>${tag}</div>
+    <div class="small-print">${name}${e.bought === false ? '・沒買（不計花費）' : `・花費 ${L.money(H.entryCost(e, LS()))}`}${e.late ? '・開獎截止後補登' : ''}</div>
+    ${r ? `<div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(r.draw.numbers, { small: true, draw: true })}</div>` : ''}
+    ${balls(e.numbers, { small: true, hit: r?.hitNumbers })}${plays}
+    <div class="row" style="margin-top:6px"><button class="small" data-act="lh-toggle" data-id="${e.id}">切換「有買／沒買」</button><button class="small" data-act="lh-copy" data-id="${e.id}">📋 複製</button>${r ? '' : `<button class="small danger" data-act="lh-del" data-id="${e.id}">刪除</button>`}</div></div>`;
+}
+function renderLehe() {
+  const ent = S.state.lehe.entries; const st = LS();
+  const next = L.nextDrawDate(); leheDate = leheDate || next;
+  const sm = H.summarize(ent, drawMap, st);
+  const arenaEn = S.state.arena.entries.find(x => x.drawDate === next);
+  const { settled } = arenaSettled();
+  const al = H.arenaLehe(settled, A.ARENA_IDS);
+  const rate = (h, t) => (t ? (h / t * 100).toFixed(2) + '%' : '—');
+  const list = [...ent].sort((a, b) => (a.drawDate < b.drawDate ? 1 : a.drawDate > b.drawDate ? -1 : (a.createdAt < b.createdAt ? 1 : -1)));
+  view.innerHTML = `${NOTICE}
+  <div class="card"><h2>🎱 39樂合彩</h2><div class="small-print" style="font-size:13px">用同期<b>今彩539</b>開出的 5 個號碼對獎。二合／三合／四合要「所選碼全中」才中獎。選 4 碼包牌：二合 6 注、三合 4 注、四合 1 注。這頁的資料和其他分頁分開存，不影響原本的紀錄與擂台。</div></div>
+  <div class="card"><h2>下一期：${fmtDate(next)}</h2>
+    <div class="row"><button class="primary grow" data-act="lh-new">✍️ 自選號碼</button></div>
+    <div class="small-print" style="margin-top:8px">或從擂台策略帶入這期的 4 碼：</div>
+    ${arenaEn ? `<div class="row" style="margin-top:4px">${A.ARENA.map(s => `<button class="small" data-act="lh-arena" data-id="${s.id}">${s.name}</button>`).join('')}</div>` : '<div class="small-print">擂台這期的選號還沒建立。</div>'}</div>
+  <div class="card"><h2>累計成績</h2><div class="tiles">
+    <div class="tile">累計花費（已開獎）<b>${L.money(sm.spent)}</b></div><div class="tile">累計獎金<b>${L.money(sm.won)}</b></div>
+    <div class="tile">淨損益<b class="${sm.won - sm.spent >= 0 ? 'pos' : 'neg'}">${L.money(sm.won - sm.spent)}</b></div><div class="tile">已對獎筆數<b>${sm.settled}</b></div></div>
+    ${sm.pending ? `<div class="small-print">另有 ${L.money(sm.pending)} 等待開獎。</div>` : ''}
+    <div class="tablewrap"><table><thead><tr><th>玩法</th><th>注數</th><th>中獎注</th><th>你的命中率</th><th>理論機率</th></tr></thead><tbody>
+    ${H.PLAYS.map(k => `<tr><td>${H.PLAY_NAME[k]}</td><td>${sm.byPlay[k].tickets}</td><td>${sm.byPlay[k].hits}</td><td>${rate(sm.byPlay[k].hits, sm.byPlay[k].tickets)}</td><td>${(H.P_HIT[k] * 100).toFixed(k === 4 ? 4 : 2)}%（1/${Math.round(1 / H.P_HIT[k]).toLocaleString()}）</td></tr>`).join('')}</tbody></table></div>
+    <div class="small-print">命中率包含有買與沒買的已開獎紀錄；花費與獎金只算有買的。理論機率：二合 10/741、三合 10/9139、四合 5/82251。期望值：每注 25 元平均只拿回約 ${(H.P_HIT[2] * st.prizes[2] / st.price * 100).toFixed(0)}%（二合）／${(H.P_HIT[3] * st.prizes[3] / st.price * 100).toFixed(0)}%（三合）／${(H.P_HIT[4] * st.prizes[4] / st.price * 100).toFixed(0)}%（四合）。</div></div>
+  <div class="card"><h2>擂台策略換成樂合彩會怎樣</h2>
+    <div class="small-print">用擂台已開獎的即時紀錄（共 ${settled.length} 期），把每個策略的 4 碼當成二合 6 注／三合 4 注／四合 1 注，算各會中幾注。純屬模擬，不花錢。</div>
+    <div class="tablewrap"><table><thead><tr><th>策略</th><th>期數</th><th>二合中</th><th>三合中</th><th>四合中</th></tr></thead><tbody>
+    ${A.ARENA.map(s => ({ s, o: al[s.id] })).sort((a, b) => b.o[2] - a.o[2]).map(({ s, o }) => `<tr class="${s.id === 'random' ? 'base' : ''}"><td class="sname">${s.name}</td><td>${o.draws}</td><td>${o[2]}</td><td>${o[3]}</td><td>${o[4]}</td></tr>`).join('')}
+    <tr class="base"><td><b>理論期望</b></td><td>${settled.length}</td><td>${(H.EXPECT4[2] * settled.length).toFixed(2)}</td><td>${(H.EXPECT4[3] * settled.length).toFixed(3)}</td><td>${(H.EXPECT4[4] * settled.length).toFixed(4)}</td></tr></tbody></table></div>
+    <div class="small-print">期數少時差異幾乎全是運氣；開獎彼此獨立，沒有策略能提高中獎機率。</div></div>
+  <div class="card"><h2>紀錄</h2>${list.length ? '' : '<div class="muted">還沒有樂合彩紀錄。</div>'}</div>
+  ${list.slice(0, 100).map(leheEntryCard).join('')}
+  <div class="card"><h2>價格與獎金設定</h2>
+    <div class="alert warn">以下為依台灣彩券公告整理的預設值：每注 NT$25；二合 NT$1,125、三合 NT$11,250、四合 NT$212,500（固定獎金；中獎注數過多超過單期上限時改均分）。<b>請以台灣彩券官網公告為準</b>，若有變動可在這裡修改。</div>
+    <label class="field">每注價格（NT$）<input type="number" inputmode="numeric" min="1" id="lh-price" value="${st.price}"></label>
+    ${H.PLAYS.map(k => `<label class="field">${H.PLAY_NAME[k]} 單注獎金（NT$）<input type="number" inputmode="numeric" min="0" data-prize="${k}" value="${st.prizes[k]}"></label>`).join('')}
+    <div class="row"><button class="small" data-act="lh-reset">恢復預設值</button></div>
+    <div class="small-print">來源：<a href="https://www.taiwanlottery.com/" target="_blank" rel="noopener">台灣彩券</a>。兌獎期限為開獎日次日起三個月內。</div></div>`;
+  $('#lh-price').onchange = e => { st.price = Math.max(1, Math.round(+e.target.value || 25)); S.save(); toast('已儲存'); render(); };
+  view.querySelectorAll('[data-prize]').forEach(i => (i.onchange = e => { st.prizes[i.dataset.prize] = Math.max(0, Math.round(+e.target.value || 0)); S.save(); toast('已儲存'); render(); }));
+}
+async function onLeheClick(e) {
+  const t = e.target.closest('[data-act]'); if (!t) return;
+  const act = t.dataset.act; const next = L.nextDrawDate();
+  const en = S.state.lehe.entries.find(x => x.id === t.dataset.id);
+  if (act === 'lh-new') leheSheet({ date: next });
+  else if (act === 'lh-arena') {
+    const a = S.state.arena.entries.find(x => x.drawDate === next); if (!a) return;
+    leheSheet({ date: next, initial: a.picks[t.dataset.id], plays: [2, 3, 4], source: t.dataset.id, title: `帶入：${A.nameOf(t.dataset.id)}` });
+  } else if (act === 'lh-toggle' && en) { en.bought = en.bought === false; S.save(); render(); toast(en.bought ? '改為「有買」' : '改為「沒買」（不計花費）'); }
+  else if (act === 'lh-copy' && en) copyText(L.fmtNums(en.numbers));
+  else if (act === 'lh-del' && en && await confirmSheet('<p>確定刪除這筆樂合彩紀錄？</p>', '刪除')) { S.state.lehe.entries = S.state.lehe.entries.filter(x => x !== en); S.save(); render(); }
+  else if (act === 'lh-reset') { S.state.lehe.settings = JSON.parse(JSON.stringify(H.DEFAULT_SETTINGS)); S.save(); render(); toast('已恢復預設'); }
+}
+
 // ---------- 開獎 ----------
 function numberHeat() {
   const recent = drawChrono.slice(-100);
@@ -509,7 +612,7 @@ function applyTheme() {
 }
 function render() {
   document.querySelectorAll('#tabs button').forEach(b => { if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
-  ({ today: renderToday, records: renderRecords, stats: renderStats, arena: renderArena, draws: renderDraws, settings: renderSettings })[tab]();
+  ({ today: renderToday, records: renderRecords, stats: renderStats, arena: renderArena, lehe: renderLehe, draws: renderDraws, settings: renderSettings })[tab]();
   $('#clock').textContent = '台灣時間 ' + new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit' });
 }
 function go(t) { tab = t; window.scrollTo(0, 0); render(); }
@@ -519,6 +622,7 @@ view.addEventListener('click', e => {
   else if (tab === 'records') onRecordsClick(e);
   else if (tab === 'stats') onStatsClick(e);
   else if (tab === 'arena') onArenaClick(e);
+  else if (tab === 'lehe') onLeheClick(e);
   else if (tab === 'draws') onDrawsClick(e);
   else if (tab === 'settings') onSettingsClick(e);
 });
