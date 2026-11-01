@@ -8,7 +8,7 @@ const map = L.buildDrawMap(rd('history.json').draws, rd('results.json').draws, {
 const chrono = L.drawsChrono(map);
 const nums = chrono.map(d => d.numbers);
 assert.ok(chrono.length >= 1352);
-assert.equal(A.ARENA.length, 12);
+assert.equal(A.ARENA.length, 20); assert.equal(A.BASE_IDS.length, 12); assert.equal(A.ORIG_IDS.length, 8);
 
 // 理論分布
 assert.ok(Math.abs(A.P4.reduce((a, b) => a + b) - 1) < 1e-12);
@@ -118,3 +118,39 @@ assert.ok(Math.abs(A.pChi2df3(3.0) - 0.3916) < 0.001);
   assert.ok(A.evaluateAll(d, 0).rows.find(r => r.id === 'hot30').pZ < 0.001);
 }
 console.log('arena tests ok');
+
+// ---------- 你的策略（原版 Python 8 策略） ----------
+// 下列期望值已用原版 Python（daily_strategy_groups，size=4、pool_size=18，numpy 亂數改餵入同一串種子亂數）逐一比對一致
+const PY_FIXTURES = [{"k":100,"date":"2022-11-05","picks":{"o_hot":[3,10,35,36],"o_hotcold":[1,8,29,36],"o_trend":[9,18,26,27],"o_cooc":[9,16,27,28],"o_votes":[1,9,22,28],"o_weighted":[1,9,22,36],"o_pair":[1,10,20,22],"o_random":[3,7,31,36]}},{"k":1000,"date":"2025-09-17","picks":{"o_hot":[7,21,26,28],"o_hotcold":[7,14,29,38],"o_trend":[2,9,25,28],"o_cooc":[7,20,28,30],"o_votes":[12,20,28,29],"o_weighted":[7,20,28,29],"o_pair":[2,21,23,29],"o_random":[2,8,17,29]}},{"k":1274,"date":"2026-07-30","picks":{"o_hot":[12,13,34,37],"o_hotcold":[1,12,34,37],"o_trend":[12,19,24,39],"o_cooc":[1,8,16,26],"o_votes":[5,12,34,37],"o_weighted":[12,19,34,37],"o_pair":[1,6,13,37],"o_random":[5,6,26,39]}}];
+for (const fx of PY_FIXTURES) {
+  assert.equal(chrono[fx.k].date, fx.date);
+  const p = A.pickAll(nums.slice(0, fx.k), fx.date);
+  for (const id of A.ORIG_IDS) assert.deepEqual(p[id], fx.picks[id], `${id}@${fx.date}`);
+}
+// 加入新策略不改變原本 12 策略（多策略投票只看原本的策略）
+{
+  const p = A.pickAll(nums.slice(0, 900), chrono[900].date);
+  for (const id of A.ORIG_IDS) assert.ok(A.validNumbers4(p[id]), id);
+}
+// 舊紀錄（只有 12 個策略）仍有效，新策略不計分；指紋算法對舊紀錄不變
+{
+  const dm = new Map([['2026-10-20', { date: '2026-10-20', numbers: [1, 2, 3, 4, 5] }]]);
+  const picks = A.pickAll(nums.slice(0, 500), '2026-10-20'); const base = Object.fromEntries(A.BASE_IDS.map(id => [id, picks[id]]));
+  const old = { drawDate: '2026-10-20', lockedAt: '2026-10-20T01:00:00Z', picks: base };
+  assert.ok(A.entryCounts(old)); assert.deepEqual(A.countedIds(old), A.BASE_IDS);
+  const r = A.settleEntries([old], dm);
+  assert.equal(r.settled.length, 1); assert.equal(r.settled[0].hits.o_hot, undefined); assert.equal(r.dist.o_hot, undefined);
+  const full = { ...old, picks };
+  assert.deepEqual(A.countedIds(full), A.ARENA_IDS);
+  assert.equal(await A.entryFingerprint('d', 'x', base), await A.entryFingerprint('d', 'x', { ...base }));
+  // 20:30 前可補上；補上後不改原本選號
+  const e = { drawDate: '2026-10-29', lockedAt: '2026-10-29T01:00:00Z', picks: { ...base }, fp: 'abc' };
+  assert.equal(await A.appendOriginal(e, chrono, new Date('2026-10-29T21:00:00+08:00')), false, '過 20:30 不補');
+  assert.ok(await A.appendOriginal(e, chrono, new Date('2026-10-29T12:00:00+08:00')));
+  assert.equal(e.fp, 'abc'); for (const id of A.BASE_IDS) assert.deepEqual(e.picks[id], base[id]);
+  assert.ok(A.origCounts(e)); assert.equal(e.origFp.length, 12);
+  const past = chrono.filter(d => d.date < '2026-10-29').map(d => d.numbers);
+  assert.deepEqual(e.picks.o_hot, A.pickAll(past, '2026-10-29').o_hot, '補上的選號只看該期以前');
+  assert.equal(await A.appendOriginal(e, chrono, new Date('2026-10-29T13:00:00+08:00')), false, '已補過不再補');
+}
+console.log('original strategies ok');

@@ -53,7 +53,7 @@ export function summarize(entries, drawMap, settings = DEFAULT_SETTINGS) {
 export function arenaLehe(settled, ids) {
   const out = Object.fromEntries(ids.map(id => [id, { draws: 0, 2: 0, 3: 0, 4: 0 }]));
   for (const st of settled) for (const id of ids) {
-    const h = st.hits[id]; const o = out[id]; o.draws++;
+    const h = st.hits[id]; if (h === undefined) continue; const o = out[id]; o.draws++;
     o[2] += C(h, 2); o[3] += C(h, 3); o[4] += C(h, 4);
   }
   return out;
@@ -76,7 +76,7 @@ export function arenaPLSeries(settled, ids, settings = DEFAULT_SETTINGS) {
   const cost = (C(4, 2) + C(4, 3) + C(4, 4)) * settings.price;
   const byId = Object.fromEntries(ids.map(id => [id, []])); const cum = Object.fromEntries(ids.map(id => [id, 0]));
   for (const st of chrono) for (const id of ids) {
-    const h = st.hits[id]; cum[id] += C(h, 2) * settings.prizes[2] + C(h, 3) * settings.prizes[3] + C(h, 4) * settings.prizes[4] - cost; byId[id].push(cum[id]);
+    const h = st.hits[id]; if (h === undefined) { byId[id].push(byId[id].length && byId[id].at(-1) !== null ? cum[id] : null); continue; } cum[id] += C(h, 2) * settings.prizes[2] + C(h, 3) * settings.prizes[3] + C(h, 4) * settings.prizes[4] - cost; byId[id].push(cum[id]);
   }
   return { dates: chrono.map(s => s.date), byId, costPerDraw: cost };
 }

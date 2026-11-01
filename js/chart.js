@@ -1,11 +1,12 @@
 // 輕量 SVG 折線圖（無外部套件）。series: [{id, name, color, values:[number]}]，x 為索引。
-export const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324', '#469990', '#808000', '#000075', '#a9a9a9'];
+export const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324', '#469990', '#808000', '#000075', '#a9a9a9', '#800000', '#aaa000', '#ff7f7f', '#2f4f4f', '#ff8c00', '#1e90ff', '#8b008b', '#556b2f'];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const fmt = (v, d) => (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(d));
 export function lineChart({ series, labels = [], baseline = null, baselineLabel = '', height = 220, digits = 2, zeroLine = false }) {
   const W = 360, H = height, L = 44, R = 8, T = 10, B = 22;
-  const vis = series.filter(s => s.values.length);
-  const all = vis.flatMap(s => s.values).concat(baseline !== null ? [baseline] : []).concat(zeroLine ? [0] : []);
+  const vis = series.filter(s => s.values.some(v => v !== null && v !== undefined));
+  const ok = v => v !== null && v !== undefined;
+  const all = vis.flatMap(s => s.values.filter(ok)).concat(baseline !== null ? [baseline] : []).concat(zeroLine ? [0] : []);
   if (!all.length) return '<div class="small-print">還沒有資料可以畫圖。</div>';
   let lo = Math.min(...all), hi = Math.max(...all); if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
   const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
@@ -18,8 +19,11 @@ export function lineChart({ series, labels = [], baseline = null, baselineLabel 
   const base = baseline !== null ? `<line x1="${L}" x2="${W - R}" y1="${y(baseline)}" y2="${y(baseline)}" stroke="currentColor" stroke-dasharray="4 3" stroke-width="1.4"/><text x="${W - R}" y="${y(baseline) - 3}" text-anchor="end" font-size="9" fill="currentColor">${esc(baselineLabel)}</text>` : '';
   const zero = zeroLine ? `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="currentColor" stroke-opacity=".5"/>` : '';
   const lines = vis.map(s => {
-    const pts = s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-    return s.values.length === 1 ? `<circle cx="${x(0)}" cy="${y(s.values[0])}" r="3" fill="${s.color}"/>` : `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${s.bold ? 2.4 : 1.6}" stroke-linejoin="round"/>`;
+    // null 代表該策略那時還沒有資料：切成多段折線，只有一點就畫圓點
+    const segs = []; let cur = [];
+    s.values.forEach((v, i) => { if (ok(v)) cur.push([i, v]); else if (cur.length) { segs.push(cur); cur = []; } });
+    if (cur.length) segs.push(cur);
+    return segs.map(sg => sg.length === 1 ? `<circle cx="${x(sg[0][0])}" cy="${y(sg[0][1])}" r="3" fill="${s.color}"/>` : `<polyline points="${sg.map(([i, v]) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.bold ? 2.4 : 1.6}"${s.dash ? ' stroke-dasharray="5 3"' : ''} stroke-linejoin="round"/>`).join('');
   }).join('');
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" style="display:block;max-width:100%;height:auto">${grid}${zero}${base}${lines}${xl}</svg>`;
 }

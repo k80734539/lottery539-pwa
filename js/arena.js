@@ -1,6 +1,7 @@
 // 策略擂台：每期每個策略自動選 4 碼（虛擬前向測試），並用歷史資料做 walk-forward 回測。
 // 純邏輯（無 DOM），可在 Node 與瀏覽器執行。所有策略只看「該期以前」的開獎資料。
 import { mulberry32, validNumbers, cutoffInstant } from './logic.js';
+import { ORIGINAL, originalPicks } from './original.js';
 
 export const PICK_N = 4;
 export const WARMUP = 30; // 回測前 30 期只當暖身資料，不計分
@@ -19,6 +20,11 @@ export const ARENA = [
   { id: 'weighted', name: '加權隨機', kind: 'new', desc: '依近 100 期出現次數加權的隨機抽 4 碼' },
   { id: 'ensemble', name: '多策略投票', kind: 'new', desc: '其他非隨機策略各投票，得票最高的 4 碼' },
 ];
+/** 原本 12 個策略（舊紀錄都有這些；指紋、多策略投票只用它們） */
+export const BASE_IDS = ARENA.map(s => s.id);
+// 「你的策略」：原版 Python 專案的 8 個每日策略（kind 'original'，名稱加「（原版）」避免與擂台同名策略混淆）
+for (const o of ORIGINAL) ARENA.push({ id: o.id, name: `${o.py}（原版）`, py: o.py, kind: 'original', desc: o.desc });
+export const ORIG_IDS = ORIGINAL.map(o => o.id);
 export const ARENA_IDS = ARENA.map(s => s.id);
 export const nameOf = id => ARENA.find(s => s.id === id)?.name ?? id;
 
@@ -149,9 +155,18 @@ export function pickAll(past, date) {
   }
   { // 多策略投票：除了隨機與自己以外的策略
     const votes = new Array(40).fill(0);
-    for (const id of ARENA_IDS) if (id !== 'random' && id !== 'ensemble') for (const x of out[id]) votes[x]++;
+    for (const id of BASE_IDS) if (id !== 'random' && id !== 'ensemble') for (const x of out[id]) votes[x]++;
     out.ensemble = sortNum(topK(votes, 4, R('ensemble')));
   }
+  Object.assign(out, pickOriginal(past, date));
+  return out;
+}
+/** 只算「你的策略」8 碼組（同樣的種子方式）；沒有歷史資料時退回種子隨機 4 碼 */
+export function pickOriginal(past, date) {
+  const R = id => mulberry32(seedFor(date, id));
+  const o = past.length ? originalPicks(past, R) : null;
+  const out = {};
+  for (const id of ORIG_IDS) out[id] = sortNum(o?.[id] ?? shuffle(ALL, R(id)).slice(0, 4));
   return out;
 }
 
@@ -244,7 +259,26 @@ export function backtestArena(chrono, warm = WARMUP) {
 }
 
 // ---------- 前向（即時）追蹤 ----------
-export function validPicks(p) { return p && ARENA_IDS.every(id => validNumbers4(p[id])); }
+export function validPicks(p) { return !!p && BASE_IDS.every(id => validNumbers4(p[id])); }
+/** 這筆紀錄「你的策略」是否有效：8 組都合法，且（補上的話）補上時間也早於當期 20:30 */
+export function origCounts(e) {
+  if (!e?.picks || !ORIG_IDS.every(id => validNumbers4(e.picks[id]))) return false;
+  const at = e.origLockedAt ?? e.lockedAt;
+  return !isNaN(Date.parse(at)) && new Date(at) < cutoffInstant(e.drawDate);
+}
+/** 這筆紀錄會計分的策略 id */
+export function countedIds(e) { return entryCounts(e) ? (origCounts(e) ? ARENA_IDS : BASE_IDS) : []; }
+/** 舊紀錄（只有 12 個策略）在開獎日 20:30 前補上「你的策略」：不改動原本的選號與指紋，另存補上時間與指紋。 */
+export async function appendOriginal(entry, chrono, now = new Date()) {
+  if (!entryCounts(entry) || ORIG_IDS.some(id => entry.picks[id]) || !(now < cutoffInstant(entry.drawDate))) return false;
+  const past = chrono.filter(d => d.date < entry.drawDate);
+  const op = pickOriginal(past.map(d => d.numbers), entry.drawDate);
+  const at = now.toISOString();
+  Object.assign(entry.picks, op);
+  entry.origLockedAt = at; entry.origHistCount = past.length;
+  entry.origFp = await fingerprintIds(entry.drawDate, at, op, ORIG_IDS);
+  return true;
+}
 export function validNumbers4(a) { return Array.isArray(a) && a.length === 4 && new Set(a).size === 4 && a.every(n => Number.isInteger(n) && n >= 1 && n <= 39); }
 /** 為 date 這一期建立紀錄：用 date 以前的開獎資料。 */
 export async function makeEntry(date, chrono, now = new Date()) {
@@ -254,7 +288,11 @@ export async function makeEntry(date, chrono, now = new Date()) {
   return { drawDate: date, lockedAt, histLast: past.length ? past[past.length - 1].date : null, histCount: past.length, picks, fp: await entryFingerprint(date, lockedAt, picks) };
 }
 export async function entryFingerprint(date, lockedAt, picks) {
-  const text = `${date}|${lockedAt}|` + ARENA_IDS.map(id => `${id}:${picks[id].join(',')}`).join(';');
+  // 只串接紀錄中有的策略（舊 12 策略紀錄的指紋計算方式不變）
+  return fingerprintIds(date, lockedAt, picks, ARENA_IDS.filter(id => picks[id]));
+}
+async function fingerprintIds(date, lockedAt, picks, ids) {
+  const text = `${date}|${lockedAt}|` + ids.map(id => `${id}:${picks[id].join(',')}`).join(';');
   if (globalThis.crypto?.subtle) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
     return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
@@ -275,9 +313,10 @@ export function settleEntries(entries, drawMap) {
     const draw = drawMap.get(e.drawDate);
     if (!draw) continue;
     const h = {};
-    for (const id of ARENA_IDS) { h[id] = hits(e.picks[id], draw.numbers); dist[id][h[id]]++; }
+    for (const id of countedIds(e)) { h[id] = hits(e.picks[id], draw.numbers); dist[id][h[id]]++; }
     settled.push({ date: e.drawDate, draw, hits: h, picks: e.picks, fp: e.fp });
   }
   settled.sort((a, b) => (a.date < b.date ? 1 : -1));
+  for (const id of ORIG_IDS) if (!dist[id].some(Boolean)) delete dist[id]; // 還沒有已開獎紀錄的「你的策略」不列入檢定
   return { dist, settled };
 }

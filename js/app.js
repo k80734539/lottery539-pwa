@@ -121,8 +121,11 @@ async function mergeServerArena() {
       const i = S.state.arena.entries.findIndex(e => e.drawDate === se.drawDate);
       if (i < 0) { S.state.arena.entries.push(entry); changed = true; continue; }
       const le = S.state.arena.entries[i];
-      const same = A.ARENA_IDS.every(id => (le.picks?.[id] || []).join() === se.picks[id].join());
+      const same = A.ARENA_IDS.every(id => (le.picks?.[id] || []).join() === (se.picks[id] || []).join());
+      const sameBase = A.BASE_IDS.every(id => (le.picks?.[id] || []).join() === se.picks[id].join());
       if (!same && (!A.entryCounts(le) || Date.parse(se.lockedAt) < Date.parse(le.lockedAt))) { S.state.arena.entries[i] = entry; changed = true; }
+      // 伺服器替同一筆紀錄補上了「你的策略」：本機還沒有就一起採用
+      else if (sameBase && A.origCounts(se) && !A.origCounts(le)) { S.state.arena.entries[i] = { ...le, picks: { ...le.picks, ...se.picks }, origLockedAt: se.origLockedAt, origFp: se.origFp, origHistCount: se.origHistCount }; changed = true; }
     }
     if (changed) S.save();
   } catch {}
@@ -406,6 +409,9 @@ async function ensureArena() {
       const e = await A.makeEntry(date, drawChrono);
       // 以 nextDrawDate 產生者必然早於 20:30；再檢查一次避免時鐘邊界
       if (A.entryCounts(e)) { S.state.arena.entries.push(e); S.save(); }
+    } else {
+      const e = S.state.arena.entries.find(x => x.drawDate === date);
+      if (e && await A.appendOriginal(e, drawChrono)) S.save(); // 舊版建立的紀錄：20:30 前補上「你的策略」
     }
   } finally { arenaBusy = false; }
 }
@@ -422,7 +428,7 @@ const hiddenLive = new Set(), hiddenBt = new Set(), hiddenLh = new Set();
 const colorOf = id => G.COLORS[A.ARENA_IDS.indexOf(id) % G.COLORS.length];
 const shortDate = d => d ? d.slice(2).replace(/-/g, '/') : '';
 function arenaChart(dates, byId, hidden, act, note) {
-  const series = A.ARENA.filter(s => !hidden.has(s.id)).map(s => ({ id: s.id, name: s.name, color: colorOf(s.id), values: byId[s.id] || [], bold: s.id === 'random' }));
+  const series = A.ARENA.filter(s => !hidden.has(s.id)).map(s => ({ id: s.id, name: s.name, color: colorOf(s.id), values: byId[s.id] || [], bold: s.id === 'random', dash: s.kind === 'original' }));
   return `<div class="card"><h2>📈 累計平均命中走勢</h2><div class="small-print">${note}虛線為理論隨機 ${A.MEAN4.toFixed(4)} 顆／期。點下面的策略可以顯示或隱藏。</div>
     ${G.lineChart({ series, labels: dates.map(shortDate), baseline: A.MEAN4, baselineLabel: '理論 0.5128', digits: 2 })}
     ${G.legend(A.ARENA.map(s => ({ id: s.id, name: s.name, color: colorOf(s.id) })), hidden, act)}</div>`;
@@ -430,7 +436,11 @@ function arenaChart(dates, byId, hidden, act, note) {
 function liveCurve(settled) {
   const chrono = [...settled].sort((a, b) => (a.date < b.date ? -1 : 1));
   const byId = Object.fromEntries(A.ARENA_IDS.map(id => [id, []])); const cum = Object.fromEntries(A.ARENA_IDS.map(id => [id, 0]));
-  chrono.forEach((st, i) => A.ARENA_IDS.forEach(id => { cum[id] += st.hits[id]; byId[id].push(cum[id] / (i + 1)); }));
+  const cnt = Object.fromEntries(A.ARENA_IDS.map(id => [id, 0]));
+  chrono.forEach(st => A.ARENA_IDS.forEach(id => { // 舊紀錄沒有「你的策略」：該策略從第一筆有的紀錄開始算
+    if (st.hits[id] === undefined) { byId[id].push(cnt[id] ? cum[id] / cnt[id] : null); return; }
+    cum[id] += st.hits[id]; cnt[id]++; byId[id].push(cum[id] / cnt[id]);
+  }));
   return { dates: chrono.map(s => s.date), byId };
 }
 function renderArena() {
@@ -440,9 +450,11 @@ function renderArena() {
   if (arenaTab === 'today') {
     const date = L.nextDrawDate();
     const e = S.state.arena.entries.find(x => x.drawDate === date);
-    body = e ? `<div class="card"><div class="row between"><h2 style="margin:0">${fmtDate(date)} 的 12 組</h2><span class="tag ok">已自動鎖定</span></div>
+    body = e ? `<div class="card"><div class="row between"><h2 style="margin:0">${fmtDate(date)} 的 ${A.ARENA.filter(s => e.picks[s.id]).length} 組</h2><span class="tag ok">已自動鎖定</span></div>
       <div class="small-print">鎖定於 ${new Date(e.lockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間）・指紋 <code>${e.fp}</code>・使用到 ${e.histLast || '—'} 為止的 ${e.histCount} 期資料（只看過去）</div>
-      ${A.ARENA.map(s => `<div class="pickcard"><div class="row between"><span><span class="sname">${s.name}</span> <span class="tag ${s.kind === 'baseline' ? '' : 'ok'}">${s.kind === 'baseline' ? '基準' : '新'}</span></span><button class="small" data-act="acopy" data-id="${s.id}">📋 複製</button></div>
+      ${e.origLockedAt ? `<div class="small-print">「你的策略」補上於 ${new Date(e.origLockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間，仍在 20:30 前）・指紋 <code>${e.origFp}</code></div>` : ''}
+      ${!A.origCounts(e) ? '<div class="small-print">這期紀錄建立時還沒有「你的策略」，且已過 20:30 無法補上，下一期開始才有。</div>' : ''}
+      ${A.ARENA.filter(s => e.picks[s.id]).map(s => `${s.id === A.ORIG_IDS[0] ? '<h3 style="margin:14px 0 4px">你的策略（原版 Python 專案的 8 個每日策略，取排名1那組 4 碼）</h3>' : ''}<div class="pickcard"><div class="row between"><span><span class="sname">${s.name}</span> <span class="tag ${s.kind === 'baseline' ? '' : 'ok'}">${s.kind === 'baseline' ? '基準' : s.kind === 'original' ? '原版' : '新'}</span></span><button class="small" data-act="acopy" data-id="${s.id}">📋 複製</button></div>
         <div class="small-print">${s.desc}</div>${balls(e.picks[s.id], { small: true })}</div>`).join('')}</div>` : '<div class="card muted">正在建立今天的選號…</div>';
     body += `<p class="small-print">每個策略的選號由「開獎日＋策略名」決定亂數種子，同一份歷史資料一定產生同一組，並在開獎日 20:30（台灣時間）前記錄鎖定。若某天沒打開 App，就沒有那天的即時紀錄（不會事後補，以免作弊）；歷史則由回測涵蓋。</p>`;
   } else if (arenaTab === 'live') {
@@ -456,8 +468,8 @@ function renderArena() {
       ${settled.length ? `<div class="alert ${verdict.kind === 'diff' ? 'warn' : 'info'}">${verdict.text}</div>` : ''}
       <div class="small-print">95% 區間為平均命中的信賴區間；校正 p 為 Holm 多重比較校正後的最小 p 值（z 檢定與卡方）。理論隨機基準 ${A.MEAN4.toFixed(4)} 若落在區間內，就看不出差異。</div></div>
       ${settled.length ? (() => { const c = liveCurve(settled); return arenaChart(c.dates, c.byId, hiddenLive, 'chart-live', `共 ${settled.length} 期即時紀錄。期數少時線會劇烈跳動，這是正常的運氣波動。`); })() : ''}
-      ${settled.slice(0, 60).map((st, i) => `<details class="card"${i === 0 ? ' open' : ''}><summary><b>${fmtDate(st.date)}</b>${i === 0 ? '（最近一期）' : ''} <span class="small-print">最佳 ${Math.max(...A.ARENA.map(s => st.hits[s.id]))} 顆</span></summary><div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(st.draw.numbers, { small: true, draw: true })}</div>
-      ${A.ARENA.map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${st.hits[s.id] >= 2 ? 'ok' : ''}">中 ${st.hits[s.id]} 顆</span></div>${balls(st.picks[s.id], { small: true, hit: st.picks[s.id].filter(n => st.draw.numbers.includes(n)) })}</div>`).join('')}</details>`).join('')}`;
+      ${settled.slice(0, 60).map((st, i) => `<details class="card"${i === 0 ? ' open' : ''}><summary><b>${fmtDate(st.date)}</b>${i === 0 ? '（最近一期）' : ''} <span class="small-print">最佳 ${Math.max(...Object.values(st.hits))} 顆</span></summary><div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(st.draw.numbers, { small: true, draw: true })}</div>
+      ${A.ARENA.filter(s => st.hits[s.id] !== undefined).map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${st.hits[s.id] >= 2 ? 'ok' : ''}">中 ${st.hits[s.id]} 顆</span></div>${balls(st.picks[s.id], { small: true, hit: st.picks[s.id].filter(n => st.draw.numbers.includes(n)) })}</div>`).join('')}</details>`).join('')}`;
   } else {
     if (!arenaBt) {
       body = `<div class="card"><h2>歷史回測（walk-forward）</h2><div class="small-print">對全部 ${drawChrono.length.toLocaleString()} 期歷史逐期往前走：每一期都只用「該期以前」的資料讓每個策略選 4 碼，再和該期實際開獎比。前 ${A.WARMUP} 期當暖身不計分。</div>
@@ -482,7 +494,7 @@ function onArenaClick(e) {
   const t = e.target.closest('[data-act]'); if (!t) return;
   if (t.dataset.act === 'chart-live' || t.dataset.act === 'chart-bt') { G.toggle(t.dataset.act === 'chart-live' ? hiddenLive : hiddenBt, t.dataset.id, A.ARENA_IDS); const y = window.scrollY; render(); window.scrollTo(0, y); return; }
   if (t.dataset.act === 'abt') {
-    t.disabled = true; t.textContent = '計算中…';
+    t.disabled = true; t.textContent = '計算中…（20 個策略，約 10–20 秒）';
     setTimeout(() => { arenaBt = A.backtestArena(drawChrono); render(); }, 30);
   } else if (t.dataset.act === 'acopy') {
     const en = S.state.arena.entries.find(x => x.drawDate === L.nextDrawDate());
@@ -562,7 +574,7 @@ function renderLehe() {
     ${H.PLAYS.map(k => `<tr><td>${H.PLAY_NAME[k]}</td><td>${sm.byPlay[k].tickets}</td><td>${sm.byPlay[k].hits}</td><td>${rate(sm.byPlay[k].hits, sm.byPlay[k].tickets)}</td><td>${(H.P_HIT[k] * 100).toFixed(k === 4 ? 4 : 2)}%（1/${Math.round(1 / H.P_HIT[k]).toLocaleString()}）</td></tr>`).join('')}</tbody></table></div>
     <div class="small-print">命中率包含有買與沒買的已開獎紀錄；花費與獎金只算有買的。理論機率：二合 10/741、三合 10/9139、四合 5/82251。期望值：每注 25 元平均只拿回約 ${(H.P_HIT[2] * st.prizes[2] / st.price * 100).toFixed(0)}%（二合）／${(H.P_HIT[3] * st.prizes[3] / st.price * 100).toFixed(0)}%（三合）／${(H.P_HIT[4] * st.prizes[4] / st.price * 100).toFixed(0)}%（四合）。</div></div>
   <div class="card"><h2>📈 你的樂合彩累計損益</h2>${(() => { const pl = H.plSeries(ent, drawMap, st); return pl.dates.length ? `<div class="small-print">只算「有買」且已開獎的紀錄，共 ${pl.dates.length} 期。</div>` + G.lineChart({ series: [{ id: 'me', name: '我', color: '#4363d8', values: pl.values, bold: true }], labels: pl.dates.map(shortDate), zeroLine: true, digits: 0 }) : '<div class="small-print">還沒有「有買」且已開獎的樂合彩紀錄。</div>'; })()}</div>
-  ${settled.length ? (() => { const ap = H.arenaPLSeries(settled, A.ARENA_IDS, st); const series = A.ARENA.filter(s => !hiddenLh.has(s.id)).map(s => ({ id: s.id, name: s.name, color: colorOf(s.id), values: ap.byId[s.id], bold: s.id === 'random' }));
+  ${settled.length ? (() => { const ap = H.arenaPLSeries(settled, A.ARENA_IDS, st); const series = A.ARENA.filter(s => !hiddenLh.has(s.id)).map(s => ({ id: s.id, name: s.name, color: colorOf(s.id), values: ap.byId[s.id], bold: s.id === 'random', dash: s.kind === 'original' }));
     return `<div class="card"><h2>📈 擂台策略模擬樂合損益</h2><div class="small-print">假設每期把每個策略的 4 碼包二合＋三合＋四合（11 注，每期 ${L.money(ap.costPerDraw)}），累計淨損益。純模擬。</div>${G.lineChart({ series, labels: ap.dates.map(shortDate), zeroLine: true, digits: 0 })}${G.legend(A.ARENA.map(s => ({ id: s.id, name: s.name, color: colorOf(s.id) })), hiddenLh, 'chart-lh')}</div>`; })() : ''}
   <div class="card"><h2>擂台策略換成樂合彩會怎樣</h2>
     <div class="small-print">用擂台已開獎的即時紀錄（共 ${settled.length} 期），把每個策略的 4 碼當成二合 6 注／三合 4 注／四合 1 注，算各會中幾注。純屬模擬，不花錢。</div>
