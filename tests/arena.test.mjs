@@ -105,8 +105,8 @@ assert.ok(Math.abs(A.pChi2df3(3.0) - 0.3916) < 0.001);
 // 全歷史回測：數量與穩定性
 {
   const bt = A.backtestArena(chrono);
-  assert.equal(bt.evaluated, 1322);
-  for (const id of A.ARENA_IDS) assert.equal(bt.dist[id].reduce((a, b) => a + b), 1322);
+  assert.equal(bt.evaluated, chrono.length - A.WARMUP);
+  for (const id of A.ARENA_IDS) assert.equal(bt.dist[id].reduce((a, b) => a + b), bt.evaluated);
   assert.deepEqual(A.backtestArena(chrono).dist, bt.dist, '回測可重現');
   const ev = A.evaluateAll(bt.dist);
   assert.ok(['none', 'diff'].includes(A.verdictText(ev).kind));
