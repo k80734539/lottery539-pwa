@@ -46,7 +46,7 @@ const r = L.settleBatch(batch, map);
 assert.equal(r.spend, 100); assert.equal(r.sets[0].matches, 5);
 assert.equal(L.batchStatus({ drawDate: '2026-10-30', sets: [], lockedAt: null }, map, now), 'draft');
 assert.equal(L.batchStatus({ drawDate: '2026-10-29', sets: [], lockedAt: null }, map, new Date('2026-10-29T21:00:00+08:00')), 'expired');
-assert.equal(L.batchStatus({ drawDate: '2026-10-29', sets: [], lockedAt: 'x' }, map, now), 'locked');
+assert.equal(L.batchStatus({ drawDate: '2026-10-29', sets: [], lockedAt: 'x' }, new Map([...map].filter(([d]) => d < '2026-10-29')), now), 'locked');
 assert.equal(L.batchStatus({ drawDate: '2026-10-25', sets: [], lockedAt: 'x' }, map, now), 'void'); // 週日無開獎
 
 // 回測：均值應接近 25/39

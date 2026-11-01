@@ -3,6 +3,7 @@ name: update-results
 # 台灣時間 = UTC+8。開獎約 20:30，主排程 21:35（UTC 13:35），再加兩個備援與隔天早上補抓。
 on:
   schedule:
+    - cron: '*/10 13-15 * * 1-6'  # 週一至週六 21:00–23:50 每 10 分鐘（無變動就不提交）
     - cron: '35 13 * * 1-6'   # 週一至週六 21:35 台灣時間
     - cron: '30 14 * * 1-6'   # 備援：22:30
     - cron: '45 15 * * 1-6'   # 備援：23:45
@@ -34,7 +35,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add data/results.json
             git commit -m "data: update draw results $(TZ=Asia/Taipei date +%F)"
-            git push
+            git pull --rebase && git push
           else
             echo "No changes."
           fi

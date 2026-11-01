@@ -47,7 +47,7 @@ async function sync(manual = false) {
     const j = await r.json();
     if (!Array.isArray(j.draws)) throw new Error('格式錯誤');
     const draws = j.draws.filter(d => L.validNumbers(d.numbers) && /^\d{4}-\d{2}-\d{2}$/.test(d.date));
-    S.state.remote = { draws, updated: j.updated || null, fetchedAt: new Date().toISOString() };
+    S.state.remote = { draws: mergeDraws(S.state.remote.draws, draws), updated: j.updated || null, fetchedAt: new Date().toISOString() };
     S.save(); rebuild();
     syncState = { status: 'ok', msg: '已同步' };
     if (manual) toast('已同步開獎資料');
@@ -55,8 +55,75 @@ async function sync(manual = false) {
     syncState = { status: 'fail', msg: '無法取得最新開獎（離線或來源異常），改用手機內已存的資料；也可手動輸入開獎號碼。' };
     if (manual) toast('同步失敗，使用已存資料');
   }
+  // 直接向台灣彩券官網抓最新開獎（不必等 GitHub Actions）；失敗不影響其他資料
+  try {
+    const off = await fetchOfficial();
+    if (off.length) {
+      const before = S.state.remote.draws.length;
+      S.state.remote.draws = mergeDraws(S.state.remote.draws, off);
+      S.state.remote.fetchedAt = new Date().toISOString();
+      S.save(); rebuild();
+      if (syncState.status !== 'ok') syncState = { status: 'ok', msg: '已從官網同步' };
+      if (manual && S.state.remote.draws.length > before) toast('已從官網取得最新開獎');
+    }
+  } catch (e) { /* 官網失敗：保留 results.json／已存資料 */ }
+  await mergeServerArena();
   await ensureArena();
   render();
+}
+const OFFICIAL = 'https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Daily539Result';
+function monthKeys(n = 2) {
+  const tw = new Date(Date.now() + 8 * 3600e3); let y = tw.getUTCFullYear(), m = tw.getUTCMonth() + 1; const out = [];
+  for (let i = 0; i < n; i++) { out.push(`${y}-${String(m).padStart(2, '0')}`); if (--m === 0) { m = 12; y--; } }
+  return out;
+}
+function compactIssue(p) { const t = String(p ?? '').trim(); return /^\d{9}$/.test(t) ? t.slice(0, 3) + t.slice(-3) : t; }
+async function fetchOfficial() {
+  const out = [];
+  for (const month of monthKeys(2)) {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const r = await fetch(`${OFFICIAL}?month=${month}&pageSize=100`, { cache: 'no-store', signal: ctl.signal });
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (Number(j.rtCode) !== 0) continue;
+      const rows = j.content?.daily539Res;
+      if (!Array.isArray(rows)) continue;
+      for (const it of rows) {
+        const nums = (it.drawNumberSize || it.drawNumberAppear || []).map(Number).sort((a, b) => a - b);
+        const date = String(it.lotteryDate || '').slice(0, 10);
+        if (L.validNumbers(nums) && /^\d{4}-\d{2}-\d{2}$/.test(date)) out.push({ issue: compactIssue(it.period), date, numbers: nums });
+      }
+    } catch {} finally { clearTimeout(to); }
+  }
+  return out;
+}
+function mergeDraws(oldList = [], add = []) {
+  const m = new Map();
+  for (const d of oldList) if (d && L.validNumbers(d.numbers) && /^\d{4}-\d{2}-\d{2}$/.test(d.date)) m.set(d.date, d);
+  for (const d of add) m.set(d.date, d);
+  return [...m.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+/** 合併伺服器（GitHub Actions）每天自動鎖定的擂台選號：本機沒有就補上；兩邊都有且不同，保留較早鎖定者。 */
+async function mergeServerArena() {
+  try {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch('data/arena_picks.json?t=' + Date.now(), { cache: 'no-store', signal: ctl.signal }); clearTimeout(to);
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!Array.isArray(j.entries)) return;
+    let changed = false;
+    for (const se of j.entries) {
+      if (!se || !/^\d{4}-\d{2}-\d{2}$/.test(se.drawDate) || !A.entryCounts(se)) continue;
+      const entry = { ...se, source: 'server' };
+      const i = S.state.arena.entries.findIndex(e => e.drawDate === se.drawDate);
+      if (i < 0) { S.state.arena.entries.push(entry); changed = true; continue; }
+      const le = S.state.arena.entries[i];
+      const same = A.ARENA_IDS.every(id => (le.picks?.[id] || []).join() === se.picks[id].join());
+      if (!same && (!A.entryCounts(le) || Date.parse(se.lockedAt) < Date.parse(le.lockedAt))) { S.state.arena.entries[i] = entry; changed = true; }
+    }
+    if (changed) S.save();
+  } catch {}
 }
 
 // ---------- 小工具 ----------
@@ -638,7 +705,12 @@ setInterval(() => {
   $('#clock').textContent = '台灣時間 ' + new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit' });
 }, 15000);
 window.addEventListener('online', () => sync(false));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { rebuild(); ensureArena().then(() => { if (tab !== 'draws') render(); }); } });
+let lastVisSync = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (Date.now() - lastVisSync > 60000) { lastVisSync = Date.now(); sync(false); return; }
+  rebuild(); ensureArena().then(() => { if (tab !== 'draws') render(); });
+});
 
 window.addEventListener('error', e => console.error('app error', e.message));
 (async function init() {

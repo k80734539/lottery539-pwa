@@ -7,7 +7,7 @@ const rd = f => JSON.parse(fs.readFileSync(new URL('../data/' + f, import.meta.u
 const map = L.buildDrawMap(rd('history.json').draws, rd('results.json').draws, {});
 const chrono = L.drawsChrono(map);
 const nums = chrono.map(d => d.numbers);
-assert.equal(chrono.length, 1352);
+assert.ok(chrono.length >= 1352);
 assert.equal(A.ARENA.length, 12);
 
 // 理論分布
@@ -84,7 +84,7 @@ assert.equal(A.hits([9, 8, 7, 6], [1, 2, 3, 4, 5]), 0);
 {
   const e = await A.makeEntry('2026-10-29', chrono, new Date('2026-10-29T10:00:00+08:00'));
   assert.equal(e.histLast, '2026-10-28'); assert.equal(e.fp.length, 12); assert.ok(A.entryCounts(e));
-  assert.deepEqual(e.picks, A.pickAll(nums, '2026-10-29'));
+  assert.deepEqual(e.picks, A.pickAll(chrono.filter(d => d.date < '2026-10-29').map(d => d.numbers), '2026-10-29'));
 }
 
 // 統計函式

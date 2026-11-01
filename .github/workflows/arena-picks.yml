@@ -1,0 +1,43 @@
+name: arena-picks
+
+# 每天替 12 個策略鎖定下一期的 4 碼（台灣時間 10:00、18:00，週一至週六）。
+on:
+  schedule:
+    - cron: '0 2 * * 1-6'    # 10:00 台灣時間
+    - cron: '0 10 * * 1-6'   # 18:00 台灣時間
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-results
+  cancel-in-progress: false
+
+jobs:
+  picks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Refresh results first (best effort)
+        run: python scripts/update_results.py --months 2 || true
+      - name: Lock next draw picks
+        run: node scripts/arena_picks.mjs
+      - name: Commit data if changed
+        run: |
+          if [ -n "$(git status --porcelain data/results.json data/arena_picks.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/results.json data/arena_picks.json
+            git commit -m "data: arena picks $(TZ=Asia/Taipei date +%F)"
+            git pull --rebase && git push
+          else
+            echo "No changes."
+          fi
