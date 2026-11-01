@@ -16,7 +16,7 @@ export function validEntryNums(nums) { return Array.isArray(nums) && nums.length
 export function validPlays(plays, n) { return Array.isArray(plays) && plays.length > 0 && plays.every(k => PLAYS.includes(k) && k <= n); }
 /** 每種玩法的注數 */
 export function ticketCount(nums, plays) { return Object.fromEntries(plays.map(k => [k, C(nums.length, k)])); }
-export function entryCost(entry, settings = DEFAULT_SETTINGS) { return Object.values(ticketCount(entry.numbers, entry.plays)).reduce((a, b) => a + b, 0) * settings.price; }
+export function entryCost(entry, settings = DEFAULT_SETTINGS) { return Object.values(ticketCount(entry.numbers, entry.plays)).reduce((a, b) => a + b, 0) * settings.price * (entry.mult || 1); }
 /** 結算：回傳 {draw, hitNumbers, byPlay:{k:{tickets, hits, hitCombos, win}}, cost, win} */
 export function settle(entry, draw, settings = DEFAULT_SETTINGS) {
   if (!draw) return null;
@@ -25,10 +25,10 @@ export function settle(entry, draw, settings = DEFAULT_SETTINGS) {
   const byPlay = {};
   let win = 0, cost = 0;
   for (const k of entry.plays) {
-    const tickets = C(entry.numbers.length, k);
+    const mult = entry.mult || 1, tickets = C(entry.numbers.length, k) * mult;
     const hitCombos = combos(hitNumbers, k);
-    const w = entry.bought === false ? 0 : hitCombos.length * (settings.prizes[k] || 0);
-    byPlay[k] = { tickets, hits: hitCombos.length, hitCombos, win: w };
+    const w = entry.bought === false ? 0 : hitCombos.length * mult * (settings.prizes[k] || 0);
+    byPlay[k] = { tickets, hits: hitCombos.length * mult, hitCombos, win: w };
     win += w; cost += tickets * settings.price;
   }
   if (entry.bought === false) cost = 0;

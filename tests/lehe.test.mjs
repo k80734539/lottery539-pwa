@@ -26,3 +26,18 @@ console.log('lehe tests ok');
   assert.equal(ap.costPerDraw, 275); assert.deepEqual(ap.byId.a, [1125 - 275, 1125 - 550]);
   console.log('lehe chart series ok');
 }
+{
+  const e4 = { drawDate: 'x', numbers: [2, 28], plays: [2], mult: 4 };
+  assert.equal(H.entryCost(e4), 100);
+  const r4 = H.settle(e4, { numbers: [2, 5, 17, 28, 37] }); assert.equal(r4.win, 4 * 1125); assert.equal(r4.byPlay[2].tickets, 4);
+  const { suggest } = await import('../js/suggest.js');
+  const fs = await import('node:fs'); const L = await import('../js/logic.js');
+  const rd = f => JSON.parse(fs.readFileSync(new URL('../data/' + f, import.meta.url)));
+  const ch = L.drawsChrono(L.buildDrawMap(rd('history.json').draws, rd('results.json').draws, {}));
+  const n = ch.map(d => d.numbers), i = ch.findIndex(d => d.date === '2026-10-31');
+  const g = suggest(n.slice(0, i + 1), '2026-11-02');
+  assert.deepEqual(g.pair, [28, 2]); assert.equal(g.tris.length, 2); g.tris.forEach(t => t.forEach(x => assert.ok(g.weighted.includes(x))));
+  // 和研究腳本的配對（上期 5 碼依近30期次數排序、同次數小號優先）一致：最近 100 期
+  for (let j = n.length - 100; j < n.length; j++) { const c = new Array(40).fill(0); for (let k = j - 30; k < j; k++) for (const x of n[k]) c[x]++; const l = n[j - 1].slice().sort((a, b) => c[b] - c[a] || a - b); assert.deepEqual(suggest(n.slice(0, j), ch[j].date).pair, [l[0], l[1]]); }
+  console.log('lehe suggest ok');
+}

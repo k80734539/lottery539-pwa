@@ -2,6 +2,7 @@ import * as L from './logic.js';
 import * as S from './store.js';
 import * as A from './arena.js';
 import * as H from './lehe.js';
+import { suggest } from './suggest.js';
 import * as G from './chart.js';
 import * as Y from './sync.js';
 
@@ -539,11 +540,11 @@ function leheSheet({ date, initial = [], plays = [2], bought = true, source = 'm
 }
 function leheEntryCard(e) {
   const d = drawMap.get(e.drawDate); const r = H.settle(e, d, LS());
-  const name = e.source === 'manual' ? '自選' : '擂台：' + A.nameOf(e.source);
+  const name = e.source === 'manual' ? '自選' : e.source === 'sug_a' ? '建議①最少虧' : e.source === 'sug_b' ? '建議②比較常中' : '擂台：' + A.nameOf(e.source);
   const tag = r ? (r.win > 0 ? `<span class="tag ok">中獎 ${L.money(r.win)}</span>` : (e.bought === false && Object.values(r.byPlay).some(p => p.hits) ? '<span class="tag ok">有對中（沒買）</span>' : '<span class="tag">已對獎</span>')) : '<span class="tag warn">等開獎</span>';
   const plays = e.plays.map(k => {
     const p = r?.byPlay[k];
-    return `<div class="small-print">${H.PLAY_NAME[k]} ${H.C(e.numbers.length, k)} 注${p ? `：<b>中 ${p.hits} 注</b>${p.hits ? '（' + p.hitCombos.map(c => L.fmtNums(c)).join('、') + '）' : ''}${p.win ? ' ・' + L.money(p.win) : ''}` : ''}</div>`;
+    return `<div class="small-print">${H.PLAY_NAME[k]} ${H.C(e.numbers.length, k) * (e.mult || 1)} 注${(e.mult || 1) > 1 ? `（同組×${e.mult}）` : ''}${p ? `：<b>中 ${p.hits} 注</b>${p.hits ? '（' + p.hitCombos.map(c => L.fmtNums(c)).join('、') + '）' : ''}${p.win ? ' ・' + L.money(p.win) : ''}` : ''}</div>`;
   }).join('');
   return `<div class="card"><div class="row between"><b>${fmtDate(e.drawDate)}</b>${tag}</div>
     <div class="small-print">${name}${e.bought === false ? '・沒買（不計花費）' : `・花費 ${L.money(H.entryCost(e, LS()))}`}${e.late ? '・開獎截止後補登' : ''}</div>
@@ -566,6 +567,12 @@ function renderLehe() {
     <div class="row"><button class="primary grow" data-act="lh-new">✍️ 自選號碼</button></div>
     <div class="small-print" style="margin-top:8px">或從擂台策略帶入這期的 4 碼：</div>
     ${arenaEn ? `<div class="row" style="margin-top:4px">${A.ARENA.map(s => `<button class="small" data-act="lh-arena" data-id="${s.id}">${s.name}</button>`).join('')}</div>` : '<div class="small-print">擂台這期的選號還沒建立。</div>'}</div>
+  <div class="card"><h2>⭐ 建議買法（${fmtDate(next)}）</h2>${(() => { const g = suggest(drawChrono.map(d => d.numbers), next); if (!g) return '<div class="muted">資料不足。</div>'; return `
+    <div class="pickcard"><div class="row between"><span class="sname">① 最少虧：二合 ×4（NT$${4 * st.price}）</span><button class="small primary" data-act="lh-sug" data-k="a">＋加入紀錄</button></div>
+    ${balls(g.pair)}<div class="small-print">上期 5 碼裡，近 30 期最常開的 2 個（${g.pair.map(x => `${String(x).padStart(2, "0")}開${g.counts[x]}次`).join('、')}），同一組買 4 注。回測最少虧。</div></div>
+    <div class="pickcard"><div class="row between"><span class="sname">② 比較常中：二合 ×2 ＋ 三合 2 組（NT$${4 * st.price}）</span><button class="small primary" data-act="lh-sug" data-k="b">＋加入紀錄</button></div>
+    <div class="row">二合 ×2 ${balls(g.pair, { small: true })}</div>${g.tris.map(t => `<div class="row">三合 ${balls(t, { small: true })}</div>`).join('')}
+    <div class="small-print">同一對買 2 注，再從多模型加權（原版）的 4 碼 ${L.fmtNums(g.weighted)} 挑最熱的 2 組三合。槓龜期較短，但平均虧比①多。</div></div>`; })()}</div>
   <div class="card"><h2>累計成績</h2><div class="tiles">
     <div class="tile">累計花費（已開獎）<b>${L.money(sm.spent)}</b></div><div class="tile">累計獎金<b>${L.money(sm.won)}</b></div>
     <div class="tile">淨損益<b class="${sm.won - sm.spent >= 0 ? 'pos' : 'neg'}">${L.money(sm.won - sm.spent)}</b></div><div class="tile">已對獎筆數<b>${sm.settled}</b></div></div>
@@ -598,6 +605,12 @@ async function onLeheClick(e) {
   const act = t.dataset.act; const next = L.nextDrawDate();
   const en = S.state.lehe.entries.find(x => x.id === t.dataset.id);
   if (act === 'chart-lh') { G.toggle(hiddenLh, t.dataset.id, A.ARENA_IDS); const y = window.scrollY; render(); window.scrollTo(0, y); return; }
+  if (act === 'lh-sug') {
+    const g = suggest(drawChrono.map(d => d.numbers), next); if (!g) return;
+    const now = new Date(), mk = (numbers, plays, mult, source) => ({ id: now.getTime().toString(36) + Math.random().toString(36).slice(2, 6), drawDate: next, numbers, plays, mult, bought: true, source, createdAt: now.toISOString(), late: now >= L.cutoffInstant(next) });
+    const add = t.dataset.k === 'a' ? [mk(g.pair, [2], 4, 'sug_a')] : [mk(g.pair, [2], 2, 'sug_b'), ...g.tris.map(x => mk(x, [3], 1, 'sug_b'))];
+    S.state.lehe.entries.push(...add); S.save(); render(); toast(`已加入 ${add.length} 筆紀錄`); return;
+  }
   if (act === 'lh-new') leheSheet({ date: next });
   else if (act === 'lh-arena') {
     const a = S.state.arena.entries.find(x => x.drawDate === next); if (!a) return;

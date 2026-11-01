@@ -11,7 +11,7 @@ const freq = (i, w) => { const c = new Array(40).fill(0); for (let k = i - w; k 
 const srt = (a, c) => a.slice().sort((x, y) => c[y] - c[x] || x - y);
 const heat = (t, c) => t.reduce((s, x) => s + c[x], 0);
 const sub = (a, k) => { const o = []; (function r(s, cur) { if (cur.length === k) return o.push(cur.slice()); for (let i = s; i < a.length; i++) { cur.push(a[i]); r(i + 1, cur); cur.pop(); } })(0, []); return o; };
-const byHeat = (ts, c) => ts.sort((x, y) => heat(y, c) - heat(x, c) || x.join() < y.join() ? -1 : 1);
+const byHeat = (ts, c) => ts.sort((x, y) => heat(y, c) - heat(x, c) || (x.join() < y.join() ? -1 : 1));
 const topCoPair = (i, w) => { const m = new Map(); for (let k = i - w; k < i; k++) for (const p of sub(nums[k], 2)) { const key = p.join(); m.set(key, (m.get(key) || 0) + 1); } let best = null, bv = -1; for (const p of sub(ALL, 2)) { const v = m.get(p.join()) || 0; if (v > bv) { bv = v; best = p; } } return best; };
 const sameTail = (mains, n, c) => { const o = []; for (const m of mains) { const p = srt(ALL.filter(x => x !== m && x % 10 === m % 10), c); for (const q of byHeat(sub(p, 2), c)) if (o.length < n) o.push([m, ...q]); if (o.length >= n) break; } return o; };
 

@@ -1,7 +1,7 @@
-const VERSION = 'v8';
+const VERSION = 'v9';
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
-const FILES = ['./', 'index.html', 'css/style.css', 'js/app.js', 'js/logic.js', 'js/store.js', 'js/arena.js', 'js/lehe.js', 'js/chart.js', 'js/sync.js', 'js/original.js', 'manifest.webmanifest',
+const FILES = ['./', 'index.html', 'css/style.css', 'js/app.js', 'js/logic.js', 'js/store.js', 'js/arena.js', 'js/lehe.js', 'js/chart.js', 'js/sync.js', 'js/original.js', 'js/suggest.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'data/history.json', 'data/results.json'];
 
 self.addEventListener('install', e => {
