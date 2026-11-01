@@ -2,6 +2,8 @@ import * as L from './logic.js';
 import * as S from './store.js';
 import * as A from './arena.js';
 import * as H from './lehe.js';
+import * as G from './chart.js';
+import * as Y from './sync.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -416,6 +418,21 @@ function arenaDistTable(ev, { showTheory = null, forward = false } = {}) {
   const theory = showTheory ? `<tr class="base"><td><b>理論隨機</b></td><td>${A.MEAN4.toFixed(3)}</td><td>—</td>${forward ? '<td>—</td>' : A.P4.map(p => `<td>${(p * showTheory).toFixed(1)}</td>`).join('')}<td>0</td><td>—</td></tr>` : `<tr class="base"><td><b>理論隨機</b></td><td>${A.MEAN4.toFixed(3)}</td><td>—</td><td>—</td><td>0</td><td>—</td></tr>`;
   return `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body}${theory}</tbody></table></div>`;
 }
+const hiddenLive = new Set(), hiddenBt = new Set(), hiddenLh = new Set();
+const colorOf = id => G.COLORS[A.ARENA_IDS.indexOf(id) % G.COLORS.length];
+const shortDate = d => d ? d.slice(2).replace(/-/g, '/') : '';
+function arenaChart(dates, byId, hidden, act, note) {
+  const series = A.ARENA.filter(s => !hidden.has(s.id)).map(s => ({ id: s.id, name: s.name, color: colorOf(s.id), values: byId[s.id] || [], bold: s.id === 'random' }));
+  return `<div class="card"><h2>📈 累計平均命中走勢</h2><div class="small-print">${note}虛線為理論隨機 ${A.MEAN4.toFixed(4)} 顆／期。點下面的策略可以顯示或隱藏。</div>
+    ${G.lineChart({ series, labels: dates.map(shortDate), baseline: A.MEAN4, baselineLabel: '理論 0.5128', digits: 2 })}
+    ${G.legend(A.ARENA.map(s => ({ id: s.id, name: s.name, color: colorOf(s.id) })), hidden, act)}</div>`;
+}
+function liveCurve(settled) {
+  const chrono = [...settled].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const byId = Object.fromEntries(A.ARENA_IDS.map(id => [id, []])); const cum = Object.fromEntries(A.ARENA_IDS.map(id => [id, 0]));
+  chrono.forEach((st, i) => A.ARENA_IDS.forEach(id => { cum[id] += st.hits[id]; byId[id].push(cum[id] / (i + 1)); }));
+  return { dates: chrono.map(s => s.date), byId };
+}
 function renderArena() {
   const seg = `<div class="seg" role="tablist">${[['today', '今日選號'], ['live', '即時排行'], ['bt', '歷史回測']].map(([k, n]) => `<button data-aseg="${k}" aria-pressed="${arenaTab === k}">${n}</button>`).join('')}</div>`;
   const intro = `<div class="card"><h2>🏟️ 策略擂台</h2><div class="small-print" style="font-size:13px">每期每個策略自動選 <b>4 碼</b>（模擬、不花錢），開獎後自動算命中顆數（4 碼中了幾顆開獎號碼），看誰命中最多。<b>純隨機 4 碼的理論平均命中是 20/39 ≈ ${A.MEAN4.toFixed(4)} 顆</b>；任何策略要算「真的比較好」，必須在多重比較校正後顯著高於它。</div></div>`;
@@ -438,6 +455,7 @@ function renderArena() {
       ${settled.length ? arenaDistTable(ev, { forward: true }) : '<div class="alert info">還沒有已開獎的即時紀錄。App 會自動在每個開獎日前記錄選號，開獎後自動結算，也可以到「開獎」頁手動輸入結果。</div>'}
       ${settled.length ? `<div class="alert ${verdict.kind === 'diff' ? 'warn' : 'info'}">${verdict.text}</div>` : ''}
       <div class="small-print">95% 區間為平均命中的信賴區間；校正 p 為 Holm 多重比較校正後的最小 p 值（z 檢定與卡方）。理論隨機基準 ${A.MEAN4.toFixed(4)} 若落在區間內，就看不出差異。</div></div>
+      ${settled.length ? (() => { const c = liveCurve(settled); return arenaChart(c.dates, c.byId, hiddenLive, 'chart-live', `共 ${settled.length} 期即時紀錄。期數少時線會劇烈跳動，這是正常的運氣波動。`); })() : ''}
       ${settled.slice(0, 60).map((st, i) => `<details class="card"${i === 0 ? ' open' : ''}><summary><b>${fmtDate(st.date)}</b>${i === 0 ? '（最近一期）' : ''} <span class="small-print">最佳 ${Math.max(...A.ARENA.map(s => st.hits[s.id]))} 顆</span></summary><div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(st.draw.numbers, { small: true, draw: true })}</div>
       ${A.ARENA.map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${st.hits[s.id] >= 2 ? 'ok' : ''}">中 ${st.hits[s.id]} 顆</span></div>${balls(st.picks[s.id], { small: true, hit: st.picks[s.id].filter(n => st.draw.numbers.includes(n)) })}</div>`).join('')}</details>`).join('')}`;
   } else {
@@ -450,6 +468,7 @@ function renderArena() {
       body = `<div class="card"><h2>歷史回測結果</h2>
         <div class="small-print">${arenaBt.from} ～ ${arenaBt.to}，共評估 <b>${arenaBt.evaluated.toLocaleString()}</b> 期（總 ${arenaBt.total.toLocaleString()} 期，前 ${arenaBt.warm} 期暖身）。每期每策略 4 碼。</div>
         ${arenaDistTable(ev, { showTheory: arenaBt.evaluated })}
+        ${arenaChart(arenaBt.curve.dates, arenaBt.curve.byId, hiddenBt, 'chart-bt', `回測 ${arenaBt.evaluated.toLocaleString()} 期，每點是到該期為止的平均命中。`).replace(/^<div class="card">/, '<div>')}
         <div class="alert ${verdict.kind === 'diff' ? 'warn' : 'info'}">${verdict.text}</div>
         <div class="small-print">表中 0–4 顆為該策略各命中顆數的期數；「理論隨機」列為期望次數。z 為平均命中相對 ${A.MEAN4.toFixed(4)} 的標準分數；校正 p 為對 ${ev.m} 項檢定（${ev.rows.length} 策略 × z 檢定＋卡方）做 Holm 校正後的最小 p 值，&lt;0.05 才算顯著。在這個樣本數與校正下，只有平均命中差距超過約 ±${ev.detect.toFixed(3)} 顆（約 ${(ev.detect / A.MEAN4 * 100).toFixed(0)}%）才有 80% 機會被偵測到。${ev.rows.some(r => r.pZ < 0.05 || (r.pChi !== null && r.pChi < 0.05)) ? '<br>⚠️ 有策略的「未校正」p 值低於 0.05，但這是同時測很多個策略時預期會出現的偶然（假陽性），校正後就不顯著了。' : ''}</div></div>
         <div class="card"><div class="row"><button class="grow" data-act="abt">🔄 重新計算（結果相同，可重現）</button></div></div>`;
@@ -461,6 +480,7 @@ function onArenaClick(e) {
   const seg = e.target.closest('[data-aseg]');
   if (seg) { arenaTab = seg.dataset.aseg; render(); return; }
   const t = e.target.closest('[data-act]'); if (!t) return;
+  if (t.dataset.act === 'chart-live' || t.dataset.act === 'chart-bt') { G.toggle(t.dataset.act === 'chart-live' ? hiddenLive : hiddenBt, t.dataset.id, A.ARENA_IDS); const y = window.scrollY; render(); window.scrollTo(0, y); return; }
   if (t.dataset.act === 'abt') {
     t.disabled = true; t.textContent = '計算中…';
     setTimeout(() => { arenaBt = A.backtestArena(drawChrono); render(); }, 30);
@@ -541,6 +561,9 @@ function renderLehe() {
     <div class="tablewrap"><table><thead><tr><th>玩法</th><th>注數</th><th>中獎注</th><th>你的命中率</th><th>理論機率</th></tr></thead><tbody>
     ${H.PLAYS.map(k => `<tr><td>${H.PLAY_NAME[k]}</td><td>${sm.byPlay[k].tickets}</td><td>${sm.byPlay[k].hits}</td><td>${rate(sm.byPlay[k].hits, sm.byPlay[k].tickets)}</td><td>${(H.P_HIT[k] * 100).toFixed(k === 4 ? 4 : 2)}%（1/${Math.round(1 / H.P_HIT[k]).toLocaleString()}）</td></tr>`).join('')}</tbody></table></div>
     <div class="small-print">命中率包含有買與沒買的已開獎紀錄；花費與獎金只算有買的。理論機率：二合 10/741、三合 10/9139、四合 5/82251。期望值：每注 25 元平均只拿回約 ${(H.P_HIT[2] * st.prizes[2] / st.price * 100).toFixed(0)}%（二合）／${(H.P_HIT[3] * st.prizes[3] / st.price * 100).toFixed(0)}%（三合）／${(H.P_HIT[4] * st.prizes[4] / st.price * 100).toFixed(0)}%（四合）。</div></div>
+  <div class="card"><h2>📈 你的樂合彩累計損益</h2>${(() => { const pl = H.plSeries(ent, drawMap, st); return pl.dates.length ? `<div class="small-print">只算「有買」且已開獎的紀錄，共 ${pl.dates.length} 期。</div>` + G.lineChart({ series: [{ id: 'me', name: '我', color: '#4363d8', values: pl.values, bold: true }], labels: pl.dates.map(shortDate), zeroLine: true, digits: 0 }) : '<div class="small-print">還沒有「有買」且已開獎的樂合彩紀錄。</div>'; })()}</div>
+  ${settled.length ? (() => { const ap = H.arenaPLSeries(settled, A.ARENA_IDS, st); const series = A.ARENA.filter(s => !hiddenLh.has(s.id)).map(s => ({ id: s.id, name: s.name, color: colorOf(s.id), values: ap.byId[s.id], bold: s.id === 'random' }));
+    return `<div class="card"><h2>📈 擂台策略模擬樂合損益</h2><div class="small-print">假設每期把每個策略的 4 碼包二合＋三合＋四合（11 注，每期 ${L.money(ap.costPerDraw)}），累計淨損益。純模擬。</div>${G.lineChart({ series, labels: ap.dates.map(shortDate), zeroLine: true, digits: 0 })}${G.legend(A.ARENA.map(s => ({ id: s.id, name: s.name, color: colorOf(s.id) })), hiddenLh, 'chart-lh')}</div>`; })() : ''}
   <div class="card"><h2>擂台策略換成樂合彩會怎樣</h2>
     <div class="small-print">用擂台已開獎的即時紀錄（共 ${settled.length} 期），把每個策略的 4 碼當成二合 6 注／三合 4 注／四合 1 注，算各會中幾注。純屬模擬，不花錢。</div>
     <div class="tablewrap"><table><thead><tr><th>策略</th><th>期數</th><th>二合中</th><th>三合中</th><th>四合中</th></tr></thead><tbody>
@@ -562,6 +585,7 @@ async function onLeheClick(e) {
   const t = e.target.closest('[data-act]'); if (!t) return;
   const act = t.dataset.act; const next = L.nextDrawDate();
   const en = S.state.lehe.entries.find(x => x.id === t.dataset.id);
+  if (act === 'chart-lh') { G.toggle(hiddenLh, t.dataset.id, A.ARENA_IDS); const y = window.scrollY; render(); window.scrollTo(0, y); return; }
   if (act === 'lh-new') leheSheet({ date: next });
   else if (act === 'lh-arena') {
     const a = S.state.arena.entries.find(x => x.drawDate === next); if (!a) return;
@@ -625,6 +649,54 @@ function onDrawsClick(e) {
   }
 }
 
+// ---------- 跨裝置同步（私人 GitHub Gist） ----------
+const GKEY = 'lottery539pwa:gist'; // 只存在這台裝置，不會被匯出、也不會上傳
+const gcfg = () => { try { return JSON.parse(localStorage.getItem(GKEY)) || {}; } catch { return {}; } };
+const gset = patch => { const c = { ...gcfg(), ...patch }; localStorage.setItem(GKEY, JSON.stringify(c)); return c; };
+let cloudBusy = false, cloudAgain = false, cloudTimer = null;
+async function cloudSync(manual = false) {
+  const c = gcfg(); if (!c.token) return;
+  if (cloudBusy) { cloudAgain = true; return; }
+  cloudBusy = true; if (tab === 'settings') renderSyncCard();
+  try {
+    const { id, doc: remote } = await Y.gistPull(c.token, c.gistId);
+    const local = Y.toDoc(S.state);
+    const merged = Y.mergeDocs(local, remote);
+    if (!Y.sameDoc(merged, { v: 1, records: local.records, meta: local.meta, tomb: local.tomb })) { Y.applyDoc(S.state, merged); S.save(true); rebuild(); }
+    let gid = id;
+    if (!remote || !Y.sameDoc(merged, remote)) gid = await Y.gistPush(c.token, id, merged);
+    gset({ gistId: gid, last: new Date().toISOString(), err: null });
+    if (manual) toast('已同步');
+    if (tab !== 'today' || manual) render();
+  } catch (e) {
+    gset({ err: (e && e.message) || String(e), errAt: new Date().toISOString() });
+    if (manual) toast('同步失敗：' + e.message);
+  } finally {
+    cloudBusy = false; if (tab === 'settings') renderSyncCard();
+    if (cloudAgain) { cloudAgain = false; setTimeout(() => cloudSync(false), 500); }
+  }
+}
+S.onSave(() => { if (!gcfg().token) return; clearTimeout(cloudTimer); cloudTimer = setTimeout(() => cloudSync(false), 4000); });
+const twTime = iso => new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+function syncCardHtml() {
+  const c = gcfg();
+  if (!c.token) return `<h2>☁️ 手機／電腦同步</h2>
+    <div class="small-print" style="font-size:13px">把紀錄（選號、樂合彩、擂台、設定）同步到你自己 GitHub 帳號裡的<b>私人 Gist</b>，手機和電腦都連上就會自動合併。設定一次就好：</div>
+    <ol class="small-print" style="font-size:13px;padding-left:18px;margin:6px 0">
+      <li>點 <a href="https://github.com/settings/tokens/new?scopes=gist&description=539app" target="_blank" rel="noopener">建立 GitHub Token</a>（已自動只勾 <b>gist</b>）。</li>
+      <li>Expiration 選「No expiration」或較長期限，按最下面綠色「Generate token」。</li>
+      <li>複製產生的 <code>ghp_…</code>，貼到下面按「連線」。另一台裝置也貼同一組（或另建一組）。</li></ol>
+    <label class="field">GitHub Token<input type="password" id="gtoken" autocomplete="off" placeholder="ghp_…"></label>
+    <div class="row"><button class="primary grow" data-act="gconnect">連線</button></div>
+    <div class="small-print">Token 只存在這台裝置的瀏覽器裡，不會放進程式碼、匯出檔或雲端資料。它只能讀寫你的 Gist，不能動你的程式碼。</div>`;
+  return `<h2>☁️ 手機／電腦同步</h2>
+    <div class="small-print">狀態：${cloudBusy ? '同步中…' : c.err ? `<span class="neg">失敗：${c.err}</span>${c.errAt ? `（${twTime(c.errAt)}）` : ''}` : '<span class="pos">已連線</span>'}</div>
+    <div class="small-print">上次成功同步：${c.last ? twTime(c.last) + '（台灣時間）' : '尚未'}${c.gistId ? ` ・ <a href="https://gist.github.com/${c.gistId}" target="_blank" rel="noopener">查看 Gist</a>` : ''}</div>
+    <div class="small-print">打開 App 時自動下載合併，有變更約 4 秒後自動上傳。同一筆紀錄兩邊都改時，以較晚修改的為準；不會整批刪除。</div>
+    <div class="row" style="margin-top:8px"><button class="primary grow" data-act="gsync" ${cloudBusy ? 'disabled' : ''}>🔄 立即同步</button><button class="grow danger" data-act="gdisconnect">中斷連線</button></div>`;
+}
+function renderSyncCard() { const el = $('#synccard'); if (el) el.innerHTML = syncCardHtml(); }
+
 // ---------- 設定 ----------
 function renderSettings() {
   const s = S.state.settings;
@@ -635,8 +707,9 @@ function renderSettings() {
   <div class="card"><h2>顯示</h2>
     <label class="row between field"><span>盲測模式（結算前隱藏策略名稱）</span><input type="checkbox" id="blind" ${s.blind ? 'checked' : ''}></label>
     <label class="field">主題<select id="theme"><option value="auto">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option></select></label></div>
+  <div class="card" id="synccard">${syncCardHtml()}</div>
   <div class="card"><h2>資料備份</h2>
-    <div class="small-print">資料只存在這支手機的瀏覽器裡。清除網站資料或換手機會消失，建議偶爾匯出備份。</div>
+    <div class="small-print">沒開同步時，資料只存在這台裝置的瀏覽器裡；清除網站資料或換手機會消失，建議偶爾匯出備份（匯出檔不含同步 Token）。</div>
     <div class="row" style="margin-top:8px"><button class="grow" data-act="export">⬇️ 匯出</button><button class="grow" data-act="import">⬆️ 匯入</button><button class="grow danger" data-act="wipe">清除全部</button></div>
     <input type="file" id="importfile" accept="application/json" hidden></div>
   <div class="card"><h2>規則與假設</h2><div class="small-print" style="font-size:13px">
@@ -669,7 +742,14 @@ async function onSettingsClick(e) {
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
   if (t.dataset.act === 'import') $('#importfile').click();
-  if (t.dataset.act === 'wipe' && await confirmSheet('<h2>清除全部資料？</h2><p>所有選號紀錄、預算設定都會刪除，無法復原。</p>', '清除')) { S.reset(); rebuild(); applyTheme(); toast('已清除'); render(); }
+  if (t.dataset.act === 'gconnect') {
+    const tok = ($('#gtoken')?.value || '').trim();
+    if (!/^(ghp_|github_pat_|gho_)[A-Za-z0-9_]{20,}$/.test(tok)) { toast('Token 格式看起來不對'); return; }
+    gset({ token: tok, gistId: null, err: null }); renderSyncCard(); await cloudSync(true);
+  }
+  if (t.dataset.act === 'gsync') cloudSync(true);
+  if (t.dataset.act === 'gdisconnect' && await confirmSheet('<p>中斷同步？這台裝置的 Token 會刪除，本機資料和雲端 Gist 都會保留。</p>', '中斷')) { localStorage.removeItem(GKEY); toast('已中斷同步'); render(); }
+  if (t.dataset.act === 'wipe' && await confirmSheet('<h2>清除全部資料？</h2><p>這台裝置的所有選號紀錄、預算設定都會刪除，無法復原。</p><p class="small-print">若有開同步，雲端資料不會被刪，下次同步時會再下載回來；要徹底清除請先中斷同步。</p>', '清除')) { S.reset(); rebuild(); applyTheme(); toast('已清除'); render(); }
 }
 
 // ---------- 主流程 ----------
@@ -708,7 +788,7 @@ window.addEventListener('online', () => sync(false));
 let lastVisSync = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
-  if (Date.now() - lastVisSync > 60000) { lastVisSync = Date.now(); sync(false); return; }
+  if (Date.now() - lastVisSync > 60000) { lastVisSync = Date.now(); cloudSync(false); sync(false); return; }
   rebuild(); ensureArena().then(() => { if (tab !== 'draws') render(); });
 });
 
@@ -720,5 +800,6 @@ window.addEventListener('error', e => console.error('app error', e.message));
   render();
   try { navigator.storage?.persist?.(); } catch {}
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  cloudSync(false);
   sync(false); // 同步完成後才建立擂台選號（確保用到最新開獎資料）
 })();

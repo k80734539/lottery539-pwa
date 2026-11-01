@@ -60,3 +60,23 @@ export function arenaLehe(settled, ids) {
 }
 /** 4 碼一期的期望中獎注數 */
 export const EXPECT4 = { 2: 6 * P_HIT[2], 3: 4 * P_HIT[3], 4: 1 * P_HIT[4] };
+/** 已開獎、有買的紀錄依開獎日累計淨損益：{dates, values} */
+export function plSeries(entries, drawMap, settings = DEFAULT_SETTINGS) {
+  const byDate = new Map();
+  for (const e of entries) {
+    if (e.bought === false) continue; const d = drawMap.get(e.drawDate); if (!d) continue;
+    const r = settle(e, d, settings); byDate.set(e.drawDate, (byDate.get(e.drawDate) || 0) + r.win - r.cost);
+  }
+  const dates = [...byDate.keys()].sort(); let c = 0;
+  return { dates, values: dates.map(d => (c += byDate.get(d))) };
+}
+/** 擂台每個策略 4 碼若每期都包二合+三合+四合（11 注）的累計模擬損益。settled 任意順序 */
+export function arenaPLSeries(settled, ids, settings = DEFAULT_SETTINGS) {
+  const chrono = [...settled].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const cost = (C(4, 2) + C(4, 3) + C(4, 4)) * settings.price;
+  const byId = Object.fromEntries(ids.map(id => [id, []])); const cum = Object.fromEntries(ids.map(id => [id, 0]));
+  for (const st of chrono) for (const id of ids) {
+    const h = st.hits[id]; cum[id] += C(h, 2) * settings.prizes[2] + C(h, 3) * settings.prizes[3] + C(h, 4) * settings.prizes[4] - cost; byId[id].push(cum[id]);
+  }
+  return { dates: chrono.map(s => s.date), byId, costPerDraw: cost };
+}

@@ -18,3 +18,11 @@ const a = H.arenaLehe([{ hits: { x: 3, y: 4 } }], ['x', 'y']);
 assert.deepEqual(a.x, { draws: 1, 2: 3, 3: 1, 4: 0 }); assert.deepEqual(a.y, { draws: 1, 2: 6, 3: 4, 4: 1 });
 assert.equal(H.combos([1, 2, 3, 4, 5], 2).length, 10);
 console.log('lehe tests ok');
+{
+  const dm = new Map([['2026-11-02', { numbers: [1, 2, 3, 10, 11] }], ['2026-11-03', { numbers: [20, 21, 22, 23, 24] }]]);
+  const pl = H.plSeries([{ drawDate: '2026-11-02', numbers: [1, 2], plays: [2] }, { drawDate: '2026-11-03', numbers: [1, 2], plays: [2] }, { drawDate: '2026-11-03', numbers: [5, 6], plays: [2], bought: false }], dm);
+  assert.deepEqual(pl.dates, ['2026-11-02', '2026-11-03']); assert.deepEqual(pl.values, [1100, 1075]);
+  const ap = H.arenaPLSeries([{ date: '2026-11-03', hits: { a: 0 } }, { date: '2026-11-02', hits: { a: 2 } }], ['a']);
+  assert.equal(ap.costPerDraw, 275); assert.deepEqual(ap.byId.a, [1125 - 275, 1125 - 550]);
+  console.log('lehe chart series ok');
+}

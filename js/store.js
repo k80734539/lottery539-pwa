@@ -1,3 +1,4 @@
+import { stamp } from './sync.js';
 // 本機儲存（localStorage；資料很小）。壞資料時保留備份並重新開始。
 const KEY = 'lottery539pwa:v1';
 const defaults = () => ({
@@ -28,8 +29,14 @@ export function load() {
   }
   return state;
 }
-export function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(state)); return true; } catch { return false; }
+let saveHook = null;
+export function onSave(fn) { saveHook = fn; }
+/** quiet=true：同步寫回時使用，不重新蓋時間戳、不觸發上傳 */
+export function save(quiet = false) {
+  if (!quiet) { try { stamp(state); } catch (e) { console.error('stamp', e); } }
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { return false; }
+  if (!quiet && saveHook) try { saveHook(); } catch {}
+  return true;
 }
 export function replaceAll(obj) {
   state = { ...defaults(), ...obj, settings: { ...defaults().settings, ...(obj.settings || {}) }, remote: { ...defaults().remote, ...(obj.remote || {}) }, arena: { entries: [], ...(obj.arena || {}) }, lehe: mergeLehe(obj.lehe) };

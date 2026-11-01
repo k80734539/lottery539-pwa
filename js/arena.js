@@ -231,12 +231,16 @@ export function backtestArena(chrono, warm = WARMUP) {
   const nums = chrono.map(d => d.numbers);
   const dist = Object.fromEntries(ARENA_IDS.map(id => [id, [0, 0, 0, 0, 0]]));
   let evaluated = 0;
+  const cum = Object.fromEntries(ARENA_IDS.map(id => [id, 0]));
+  const curve = { dates: [], byId: Object.fromEntries(ARENA_IDS.map(id => [id, []])) }; // 累計平均命中（抽樣約 200 點）
+  const step = Math.max(1, Math.ceil((nums.length - warm) / 200));
   for (let i = warm; i < nums.length; i++) {
     const picks = pickAll(nums.slice(0, i), chrono[i].date);
-    for (const id of ARENA_IDS) dist[id][hits(picks[id], nums[i])]++;
+    for (const id of ARENA_IDS) { const k = hits(picks[id], nums[i]); dist[id][k]++; cum[id] += k; }
     evaluated++;
+    if ((i - warm) % step === 0 || i === nums.length - 1) { curve.dates.push(chrono[i].date); for (const id of ARENA_IDS) curve.byId[id].push(cum[id] / evaluated); }
   }
-  return { dist, evaluated, total: nums.length, warm, from: chrono[warm]?.date, to: chrono[chrono.length - 1]?.date };
+  return { dist, evaluated, curve, total: nums.length, warm, from: chrono[warm]?.date, to: chrono[chrono.length - 1]?.date };
 }
 
 // ---------- 前向（即時）追蹤 ----------
