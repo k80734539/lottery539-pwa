@@ -12,7 +12,7 @@ assert.equal(T.normIssue('115000268'), '115268');
 // 用真實資料：截至 115268 的最近 20 期
 const map = L.buildDrawMap(rd('history.json').draws, rd('results.json').draws, {});
 const kp = rd('k3km8000_picks.json');
-const upto = Object.fromEntries(Object.entries(kp.picks).filter(([k]) => k <= '115269'));
+const upto = Object.fromEntries(Object.entries(kp.picks).filter(([k]) => k <= '115268')); // 凍結到 115268，避免新開獎改斷言
 const rows = T.buildRows(upto, T.issueMap(L.drawsChrono(map)));
 const st = T.analyze(rows, 20);
 assert.equal(st.to, '115268'); assert.equal(st.total, 21); assert.equal(st.withNear, 16);
