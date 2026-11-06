@@ -22,6 +22,12 @@
 - 選號以「開獎日＋策略」為種子，同資料必得同結果（可重現、可驗證）。
 - 理論隨機 4 碼平均命中 = 20/39 ≈ 0.5128；每期開獎彼此獨立，沒有任何策略能提高命中機率，擂台只是誠實地把這件事量出來。
 
+## 🔍 追蹤分析（K3km8000）
+
+- 獨立分頁「追蹤」：9800 論壇 K3km8000 每期報的 5 碼（`data/k3km8000_picks.json`，期別 → 號碼），用期別對上開獎，列出中的、**差 1 號**（位置＋方向 +1/−1）。
+- 最近 20 期差 1 統整（位置、+1/−1、上下期關係），以及「隔天可盯」：下期差 1 最常落到的兩個位置的 ±1，可一鍵帶入樂合紀錄。純參考。
+- 更新資料：`node scripts/sync_k3km_picks.mjs /workspace/track9800/picks.json 期別=發文id`。
+
 ## 開獎資料更新
 `.github/workflows/update-results.yml`在週一至週六台灣時間 21:35（及 22:30、23:45、隔日 08:10 備援）執行
 `scripts/update_results.py`，向 `https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Daily539Result`（官網內部端點，非正式公開 API）抓取，

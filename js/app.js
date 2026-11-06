@@ -5,6 +5,7 @@ import * as H from './lehe.js';
 import { suggest } from './suggest.js';
 import * as G from './chart.js';
 import * as Y from './sync.js';
+import * as T from './track.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -540,7 +541,7 @@ function leheSheet({ date, initial = [], plays = [2], bought = true, source = 'm
 }
 function leheEntryCard(e) {
   const d = drawMap.get(e.drawDate); const r = H.settle(e, d, LS());
-  const name = e.source === 'manual' ? '自選' : e.source === 'sug_a' ? '建議①最少虧' : e.source === 'sug_b' ? '建議②比較常中' : '擂台：' + A.nameOf(e.source);
+  const name = e.source === 'manual' ? '自選' : e.source === 'sug_a' ? '建議①最少虧' : e.source === 'sug_b' ? '建議②比較常中' : e.source === 'k3km' ? '追蹤：K3km8000 隔天可盯' : '擂台：' + A.nameOf(e.source);
   const tag = r ? (r.win > 0 ? `<span class="tag ok">中獎 ${L.money(r.win)}</span>` : (e.bought === false && Object.values(r.byPlay).some(p => p.hits) ? '<span class="tag ok">有對中（沒買）</span>' : '<span class="tag">已對獎</span>')) : '<span class="tag warn">等開獎</span>';
   const plays = e.plays.map(k => {
     const p = r?.byPlay[k];
@@ -619,6 +620,85 @@ async function onLeheClick(e) {
   else if (act === 'lh-copy' && en) copyText(L.fmtNums(en.numbers));
   else if (act === 'lh-del' && en && await confirmSheet('<p>確定刪除這筆樂合彩紀錄？</p>', '刪除')) { S.state.lehe.entries = S.state.lehe.entries.filter(x => x !== en); S.save(); render(); }
   else if (act === 'lh-reset') { S.state.lehe.settings = JSON.parse(JSON.stringify(H.DEFAULT_SETTINGS)); S.save(); render(); toast('已恢復預設'); }
+}
+
+// ---------- 追蹤分析（K3km8000） ----------
+let trackData = null, trackLoading = false, trackShown = 20;
+async function loadTrack(force = false) {
+  if ((trackData && !force) || trackLoading) return;
+  trackLoading = true;
+  try { const r = await fetch('data/k3km8000_picks.json', { cache: 'no-cache' }); trackData = await r.json(); }
+  catch { trackData = trackData || { picks: {}, posts: {} }; }
+  trackLoading = false; if (tab === 'track') render();
+}
+const pad2 = n => String(n).padStart(2, '0');
+const POSN = ['', '第1個', '第2個', '第3個', '第4個', '第5個'];
+function dirText(x) { return x.dir === 1 ? `+1→${pad2(x.to[0])}` : x.dir === -1 ? `−1→${pad2(x.to[0])}` : `±1→${x.to.map(pad2).join('、')}`; }
+/** 還沒開獎的期別：從最近一期已開獎往後數開獎日推算日期 */
+function guessDate(issue) {
+  const last = [...drawChrono].reverse().find(d => d.issue && T.normIssue(d.issue).slice(0, 3) === issue.slice(0, 3));
+  if (!last) return null;
+  let k = +issue - +T.normIssue(last.issue), d = last.date;
+  if (k <= 0 || k > 10) return null;
+  while (k > 0) { d = L.addDays(d, 1); if (L.isDrawDay(d)) k--; }
+  return d;
+}
+function postLink(issue, text = '他的發文') { const id = trackData?.posts?.[issue]; return id ? `<a href="http://www.9800.com.tw/bbs/view.asp?id=${id}" target="_blank" rel="noopener">${text}</a>` : ''; }
+function trackRowCard(r) {
+  const date = r.date || guessDate(r.issue);
+  const ds = date ? fmtDate(date) : '';
+  if (!r.draw) return `<div class="pickcard"><div class="row between"><b>${ds} 第 ${r.issue} 期</b><span class="tag warn">等開獎</span></div>
+    <div class="row"><span class="small-print">他報</span>${balls(r.picks, { small: true })}</div></div>`;
+  return `<div class="pickcard"><div class="row between"><b>${ds} 第 ${r.issue} 期</b>${r.near.length ? `<span class="tag ok">差1 ×${r.near.length}</span>` : '<span class="tag">沒有差1</span>'}</div>
+    <div class="row"><span class="small-print">他報</span>${balls(r.picks, { small: true, hit: r.hits.map(x => x.n) })}</div>
+    <div class="row" style="margin-top:4px"><span class="small-print">開獎</span>${balls(r.draw, { small: true, draw: true })}</div>
+    <div class="small-print" style="margin-top:4px">中：${r.hits.length ? r.hits.map(x => `${POSN[x.pos]} ${pad2(x.n)}`).join('、') : '無'}</div>
+    <div class="small-print"><b>差1：${r.near.length ? r.near.map(x => `${POSN[x.pos]} ${pad2(x.n)} ${dirText(x)}`).join('、') : '無'}</b></div></div>`;
+}
+function renderTrack() {
+  if (!trackData) { view.innerHTML = '<div class="card"><h2>🔍 追蹤分析</h2><div class="muted">讀取中…</div></div>'; loadTrack(); return; }
+  const rows = T.buildRows(trackData.picks || {}, T.issueMap(drawChrono));
+  if (!rows.length) { view.innerHTML = '<div class="card"><h2>🔍 追蹤分析</h2><div class="muted">還沒有追蹤資料。</div></div>'; return; }
+  const st = T.analyze(rows, T.WINDOW);
+  const latest = rows.at(-1);
+  const lDate = latest.date || guessDate(latest.issue);
+  const sg = T.suggestNext(latest.picks, st);
+  const pending = !latest.draw;
+  const leanTxt = s => s.lean === -1 ? `過去這位置多是 −1（${s.dir.down} 次 vs +1 ${s.dir.up} 次），<b>${pad2(s.n - 1)}</b> 可排前面` : s.lean === 1 ? `過去這位置多是 +1（${s.dir.up} 次 vs −1 ${s.dir.down} 次），<b>${pad2(s.n + 1)}</b> 可排前面` : '+1、−1 差不多';
+  const posBar = [1, 2, 3, 4, 5].map(p => `<tr><td>${POSN[p]}</td><td>${st.pos[p]}</td><td>${st.dirByPos[p].up}</td><td>${st.dirByPos[p].down}</td><td>${st.nextPos[p]}</td></tr>`).join('');
+  view.innerHTML = `
+  <div class="card"><h2>🔍 追蹤分析：K3km8000</h2><div class="small-print" style="font-size:13px">追蹤 9800 論壇 <a href="${trackData.forum || 'http://www.9800.com.tw/bbs/user.asp?uid=116496'}" target="_blank" rel="noopener">K3km8000</a> 每期報的 5 個號碼，重點看<b>沒中但差 1 號</b>。號碼由小到大排，「第1個～第5個」就是位置。這頁只是參考，跟其他分頁的紀錄分開。</div></div>
+  <div class="card"><h2>${pending ? '他最新報號' : '他最近一期報號'}：${lDate ? fmtDate(lDate) : ''} 第 ${latest.issue} 期</h2>
+    ${balls(latest.picks)}
+    <div class="small-print" style="margin-top:6px">${postLink(latest.issue) || '（沒有記錄發文連結）'}${pending ? '' : '・這期已開獎，下一期他還沒報（或還沒更新進來）'}</div></div>
+  ${sg ? `<div class="card"><h2>👀 ${pending ? '隔天可盯' : '照最近一期可盯'}（第 ${latest.issue} 期）</h2>
+    <div class="small-print" style="font-size:13px">看最近 ${st.draws} 期：這期有差 1 時，下一期差 1 最常落在 <b>${POSN[sg.spots[0].pos]}</b>、<b>${POSN[sg.spots[1].pos]}</b>。所以盯他這期這兩個位置的 ±1：</div>
+    ${sg.spots.map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.main ? '' : '備選・'}${POSN[s.pos]}（他報 ${pad2(s.n)}）</span><span class="small-print">下期差1落這裡 ${s.nextCount} 次</span></div>
+      ${balls(s.nums)}<div class="small-print">${leanTxt(s)}</div></div>`).join('')}
+    <div class="pickcard"><div class="row between"><span class="sname">合起來盯這 4 個</span>${pending ? '<button class="small primary" data-act="tk-add">＋加入樂合紀錄</button>' : ''}</div>${balls(sg.four)}
+      <div class="small-print">按「＋加入樂合紀錄」會帶入這 4 個號碼到樂合（預設二合 6 注），可以再改。只是照過去 ${st.draws} 期整理的參考，不代表會中。</div></div></div>` : ''}
+  <div class="card"><h2>📋 差 1 號統整（最近 ${st.draws} 期）</h2>
+    <div class="tiles"><div class="tile">差1 次數<b>${st.total}</b></div><div class="tile">有差1的期數<b>${st.withNear} / ${st.draws}</b></div>
+      <div class="tile">+1／−1<b>${st.up}／${st.down}</b></div><div class="tile">真的中<b>${st.hitsTotal} 個</b></div></div>
+    ${st.both ? `<div class="small-print">另有 ${st.both} 次是 +1、−1 兩邊都開。</div>` : ''}
+    <div class="tablewrap"><table><thead><tr><th>位置</th><th>差1</th><th>+1</th><th>−1</th><th>下期差1落這裡</th></tr></thead><tbody>${posBar}</tbody></table></div>
+    <div class="small-print">「+1」＝開出的比他報的大 1；「−1」＝開出的比他報的小 1。「下期差1落這裡」只算期號連著的上下期：這期有差1（共 ${st.signals} 次），下一期在這個位置又差1的次數；其中下一期也有差1的有 ${st.again} 次。</div></div>
+  <div class="card"><h2>🗂️ 每期對照</h2>
+    ${[...rows].reverse().slice(0, trackShown).map(trackRowCard).join('')}
+    ${rows.length > trackShown ? `<div class="row" style="margin-top:8px"><button class="grow" data-act="tk-more">再看更早的</button></div>` : ''}
+    <div class="small-print" style="margin-top:6px">中間沒列的日期是他沒發文。資料更新：${trackData.updated ? new Date(trackData.updated).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }) : '—'}。</div>
+    <div class="row" style="margin-top:6px"><button class="small" data-act="tk-reload">🔄 重新讀取</button></div></div>`;
+}
+function onTrackClick(e) {
+  const t = e.target.closest('[data-act]'); if (!t) return;
+  if (t.dataset.act === 'tk-more') { const y = window.scrollY; trackShown += 20; render(); window.scrollTo(0, y); }
+  else if (t.dataset.act === 'tk-reload') { loadTrack(true).then(() => toast('已重新讀取')); }
+  else if (t.dataset.act === 'tk-add') {
+    const rows = T.buildRows(trackData.picks || {}, T.issueMap(drawChrono)); const latest = rows.at(-1);
+    const sg = T.suggestNext(latest.picks, T.analyze(rows, T.WINDOW)); if (!sg) return;
+    const d = guessDate(latest.issue) || L.nextDrawDate();
+    leheSheet({ date: d, initial: sg.four, plays: [2], source: 'k3km', title: `帶入：K3km8000 第 ${latest.issue} 期可盯` });
+  }
 }
 
 // ---------- 開獎 ----------
@@ -784,7 +864,7 @@ function applyTheme() {
 }
 function render() {
   document.querySelectorAll('#tabs button').forEach(b => { if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
-  ({ today: renderToday, records: renderRecords, stats: renderStats, arena: renderArena, lehe: renderLehe, draws: renderDraws, settings: renderSettings })[tab]();
+  ({ today: renderToday, records: renderRecords, stats: renderStats, arena: renderArena, lehe: renderLehe, track: renderTrack, draws: renderDraws, settings: renderSettings })[tab]();
   $('#clock').textContent = '台灣時間 ' + new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit' });
 }
 function go(t) { tab = t; window.scrollTo(0, 0); render(); }
@@ -795,6 +875,7 @@ view.addEventListener('click', e => {
   else if (tab === 'stats') onStatsClick(e);
   else if (tab === 'arena') onArenaClick(e);
   else if (tab === 'lehe') onLeheClick(e);
+  else if (tab === 'track') onTrackClick(e);
   else if (tab === 'draws') onDrawsClick(e);
   else if (tab === 'settings') onSettingsClick(e);
 });
