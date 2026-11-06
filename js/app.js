@@ -623,13 +623,39 @@ async function onLeheClick(e) {
 }
 
 // ---------- 追蹤分析（K3km8000） ----------
-let trackData = null, trackLoading = false, trackShown = 20;
+let trackData = null, trackBase = null, trackLoading = false, trackShown = 20;
+const tkManual = () => { try { const m = JSON.parse(localStorage.getItem(T.MANUAL_KEY)) || {}; return { picks: m.picks || {}, posts: m.posts || {} }; } catch { return { picks: {}, posts: {} }; } };
+const tkSaveManual = m => { localStorage.setItem(T.MANUAL_KEY, JSON.stringify(m)); trackData = T.mergeManual(trackBase, m); };
 async function loadTrack(force = false) {
   if ((trackData && !force) || trackLoading) return;
   trackLoading = true;
-  try { const r = await fetch('data/k3km8000_picks.json', { cache: 'no-cache' }); trackData = await r.json(); }
-  catch { trackData = trackData || { picks: {}, posts: {} }; }
+  try { const r = await fetch('data/k3km8000_picks.json', { cache: 'no-cache' }); trackBase = await r.json(); }
+  catch { trackBase = trackBase || { picks: {}, posts: {} }; }
+  // 自動抓到的跟自己補的一模一樣 → 自己補的那筆自動收掉
+  const { manual, removed } = T.pruneManual(trackBase, tkManual());
+  if (removed.length) try { localStorage.setItem(T.MANUAL_KEY, JSON.stringify(manual)); } catch {}
+  trackData = T.mergeManual(trackBase, manual);
   trackLoading = false; if (tab === 'track') render();
+  if (removed.length) toast(`自動資料已有第 ${removed.join('、')} 期，自己補的已收掉`);
+}
+/** 預設要補的期別：最近一期已開獎的下一期；若已經有了就再往後一期 */
+function tkNextIssue() {
+  const last = [...drawChrono].reverse().find(d => d.issue); if (!last) return '';
+  let k = +T.normIssue(last.issue) + 1; while (trackData?.picks?.[String(k)]) k++;
+  return String(k);
+}
+function tkManualCard() {
+  const m = tkManual(), ks = Object.keys(m.picks).sort().reverse();
+  const nx = tkNextIssue(), nd = nx ? guessDate(nx) : null;
+  return `<div class="card"><h2>✍️ 自己補報號</h2>
+    <div class="small-print" style="font-size:13px">每天會自動去論壇抓他的報號，抓不到或抓錯時，可以在這裡自己補。只存在這台手機，會蓋過自動抓的；等自動抓到一樣的號碼，這筆會自己收掉。</div>
+    <label class="field">期號${nd ? `（${fmtDate(nd)} 是第 ${nx} 期）` : ''}<input type="text" inputmode="numeric" id="tk-issue" value="${nx}" placeholder="例 115270"></label>
+    <div class="small-print">他報的 5 個號碼</div>
+    <div class="row" style="flex-wrap:nowrap">${[0, 1, 2, 3, 4].map(i => `<input type="number" inputmode="numeric" min="1" max="39" class="tk-n" aria-label="第${i + 1}個號碼" style="padding:10px 4px;text-align:center">`).join('')}</div>
+    <label class="field">發文連結或 id（可不填）<input type="text" id="tk-post" placeholder="http://www.9800.com.tw/bbs/view.asp?id=…"></label>
+    <div class="row"><button class="primary grow" data-act="tk-save">儲存</button></div>
+    ${ks.length ? `<div style="margin-top:10px">${ks.map(k => `<div class="pickcard"><div class="row between"><b>第 ${k} 期</b><span class="row" style="gap:6px"><button class="small" data-act="tk-edit" data-k="${k}">改</button><button class="small" data-act="tk-del" data-k="${k}">刪除</button></span></div>${balls(m.picks[k], { small: true })}</div>`).join('')}
+      <div class="row" style="margin-top:6px"><button class="small" data-act="tk-export">📋 複製自己補的</button><button class="small" data-act="tk-clear">全部清掉</button></div></div>` : ''}</div>`;
 }
 const pad2 = n => String(n).padStart(2, '0');
 const POSN = ['', '第1個', '第2個', '第3個', '第4個', '第5個'];
@@ -646,7 +672,7 @@ function guessDate(issue) {
 function postLink(issue, text = '他的發文') { const id = trackData?.posts?.[issue]; return id ? `<a href="http://www.9800.com.tw/bbs/view.asp?id=${id}" target="_blank" rel="noopener">${text}</a>` : ''; }
 function trackRowCard(r) {
   const date = r.date || guessDate(r.issue);
-  const ds = date ? fmtDate(date) : '';
+  const ds = (date ? fmtDate(date) : '') + (trackData?.manual?.includes(r.issue) ? ' <span class="tag">自己補</span>' : '');
   if (!r.draw) return `<div class="pickcard"><div class="row between"><b>${ds} 第 ${r.issue} 期</b><span class="tag warn">等開獎</span></div>
     <div class="row"><span class="small-print">他報</span>${balls(r.picks, { small: true })}</div></div>`;
   return `<div class="pickcard"><div class="row between"><b>${ds} 第 ${r.issue} 期</b>${r.near.length ? `<span class="tag ok">差1 ×${r.near.length}</span>` : '<span class="tag">沒有差1</span>'}</div>
@@ -658,7 +684,7 @@ function trackRowCard(r) {
 function renderTrack() {
   if (!trackData) { view.innerHTML = '<div class="card"><h2>🔍 追蹤分析</h2><div class="muted">讀取中…</div></div>'; loadTrack(); return; }
   const rows = T.buildRows(trackData.picks || {}, T.issueMap(drawChrono));
-  if (!rows.length) { view.innerHTML = '<div class="card"><h2>🔍 追蹤分析</h2><div class="muted">還沒有追蹤資料。</div></div>'; return; }
+  if (!rows.length) { view.innerHTML = '<div class="card"><h2>🔍 追蹤分析</h2><div class="muted">還沒有追蹤資料。</div></div>' + tkManualCard(); return; }
   const st = T.analyze(rows, T.WINDOW);
   const latest = rows.at(-1);
   const lDate = latest.date || guessDate(latest.issue);
@@ -670,7 +696,7 @@ function renderTrack() {
   <div class="card"><h2>🔍 追蹤分析：K3km8000</h2><div class="small-print" style="font-size:13px">追蹤 9800 論壇 <a href="${trackData.forum || 'http://www.9800.com.tw/bbs/user.asp?uid=116496'}" target="_blank" rel="noopener">K3km8000</a> 每期報的 5 個號碼，重點看<b>沒中但差 1 號</b>。號碼由小到大排，「第1個～第5個」就是位置。這頁只是參考，跟其他分頁的紀錄分開。</div></div>
   <div class="card"><h2>${pending ? '他最新報號' : '他最近一期報號'}：${lDate ? fmtDate(lDate) : ''} 第 ${latest.issue} 期</h2>
     ${balls(latest.picks)}
-    <div class="small-print" style="margin-top:6px">${postLink(latest.issue) || '（沒有記錄發文連結）'}${pending ? '' : '・這期已開獎，下一期他還沒報（或還沒更新進來）'}</div></div>
+    <div class="small-print" style="margin-top:6px">${trackData.manual?.includes(latest.issue) ? '（自己補的）' : ''}${postLink(latest.issue) || '（沒有記錄發文連結）'}${pending ? '' : '・這期已開獎，下一期他還沒報（或還沒更新進來，可以在下面「自己補報號」補上）'}</div></div>
   ${sg ? `<div class="card"><h2>👀 ${pending ? '隔天可盯' : '照最近一期可盯'}（第 ${latest.issue} 期）</h2>
     <div class="small-print" style="font-size:13px">看最近 ${st.draws} 期：這期有差 1 時，下一期差 1 最常落在 <b>${POSN[sg.spots[0].pos]}</b>、<b>${POSN[sg.spots[1].pos]}</b>。所以盯他這期這兩個位置的 ±1：</div>
     ${sg.spots.map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.main ? '' : '備選・'}${POSN[s.pos]}（他報 ${pad2(s.n)}）</span><span class="small-print">下期差1落這裡 ${s.nextCount} 次</span></div>
@@ -687,10 +713,33 @@ function renderTrack() {
     ${[...rows].reverse().slice(0, trackShown).map(trackRowCard).join('')}
     ${rows.length > trackShown ? `<div class="row" style="margin-top:8px"><button class="grow" data-act="tk-more">再看更早的</button></div>` : ''}
     <div class="small-print" style="margin-top:6px">中間沒列的日期是他沒發文。資料更新：${trackData.updated ? new Date(trackData.updated).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }) : '—'}。</div>
-    <div class="row" style="margin-top:6px"><button class="small" data-act="tk-reload">🔄 重新讀取</button></div></div>`;
+    <div class="row" style="margin-top:6px"><button class="small" data-act="tk-reload">🔄 重新讀取</button></div></div>
+  ${tkManualCard()}`;
 }
-function onTrackClick(e) {
+async function onTrackClick(e) {
   const t = e.target.closest('[data-act]'); if (!t) return;
+  const act = t.dataset.act, k = t.dataset.k;
+  if (act === 'tk-save') {
+    const issue = T.parseIssue($('#tk-issue').value);
+    if (!issue) return toast('期號要 6 碼，例如 115270');
+    const picks = T.parsePicks([...view.querySelectorAll('.tk-n')].map(i => i.value));
+    if (!picks) return toast('要填 5 個不同的號碼（1～39）');
+    const pv = $('#tk-post').value, post = T.parsePostId(pv);
+    if (pv.trim() && !post) return toast('發文連結看不懂，可以留空');
+    const m = tkManual(); m.picks[issue] = picks; if (post) m.posts[issue] = post; else delete m.posts[issue];
+    tkSaveManual(m); render(); toast(`已補上第 ${issue} 期：${picks.map(pad2).join(' ')}`); return;
+  }
+  if (act === 'tk-edit') {
+    const m = tkManual(); $('#tk-issue').value = k;
+    view.querySelectorAll('.tk-n').forEach((i, j) => (i.value = m.picks[k]?.[j] ?? ''));
+    $('#tk-post').value = m.posts[k] ? `http://www.9800.com.tw/bbs/view.asp?id=${m.posts[k]}` : '';
+    $('#tk-issue').scrollIntoView({ block: 'center' }); return;
+  }
+  if (act === 'tk-del' && await confirmSheet(`<p>刪除自己補的第 ${k} 期？（自動抓到的資料不受影響）</p>`, '刪除')) {
+    const m = tkManual(); delete m.picks[k]; delete m.posts[k]; tkSaveManual(m); render(); return;
+  }
+  if (act === 'tk-clear' && await confirmSheet('<p>清掉全部自己補的報號？（自動抓到的資料不受影響）</p>', '清掉')) { tkSaveManual({ picks: {}, posts: {} }); render(); return; }
+  if (act === 'tk-export') { const m = tkManual(); copyText(Object.keys(m.picks).sort().map(k => `${k}: ${m.picks[k].map(pad2).join(' ')}${m.posts[k] ? ' id=' + m.posts[k] : ''}`).join('\n')); return; }
   if (t.dataset.act === 'tk-more') { const y = window.scrollY; trackShown += 20; render(); window.scrollTo(0, y); }
   else if (t.dataset.act === 'tk-reload') { loadTrack(true).then(() => toast('已重新讀取')); }
   else if (t.dataset.act === 'tk-add') {

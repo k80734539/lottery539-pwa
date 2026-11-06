@@ -57,3 +57,30 @@ export function suggestNext(picks, stats) {
   const four = [...new Set(spots.filter(s => s.main).flatMap(s => s.nums))].sort((a, b) => a - b);
   return { spots, four, order };
 }
+
+// ---------- 自己補報號（存在這台手機，疊在 data/k3km8000_picks.json 上面） ----------
+export const MANUAL_KEY = 'lottery539pwa:k3km-manual';
+/** "04 12,22、35 38" 或 [4,12,...] → 由小到大 5 碼；格式不對回 null */
+export function parsePicks(v) {
+  const a = (Array.isArray(v) ? v : String(v ?? '').match(/\d+/g) || []).map(Number).filter(n => Number.isFinite(n) && n > 0);
+  return a.length === 5 && new Set(a).size === 5 && a.every(n => n >= 1 && n <= 39) ? a.sort((x, y) => x - y) : null;
+}
+/** 發文連結或 id → 數字 id；空白回 null */
+export function parsePostId(v) { const s = String(v ?? '').trim(); if (!s) return null; const m = s.match(/id=(\d+)/) || s.match(/^(\d{4,})$/); return m ? +m[1] : null; }
+/** 期別：115270 或 115000270 → 115270；不對回 null */
+export function parseIssue(v) { const t = normIssue(String(v ?? '').replace(/\D/g, '')); return /^\d{6}$/.test(t) ? t : null; }
+/** 合併：自己補的蓋過自動抓的 */
+export function mergeManual(base, manual) {
+  const m = manual || {}, b = base || {};
+  return { ...b, picks: { ...(b.picks || {}), ...(m.picks || {}) }, posts: { ...(b.posts || {}), ...(m.posts || {}) }, manual: Object.keys(m.picks || {}) };
+}
+/** 自動資料已經有一模一樣的號碼 → 自己補的那筆可以拿掉 */
+export function pruneManual(base, manual) {
+  const picks = { ...(manual?.picks || {}) }, posts = { ...(manual?.posts || {}) }, removed = [];
+  for (const [k, v] of Object.entries(picks)) {
+    const s = base?.picks?.[k];
+    if (s && [...s].sort((a, b) => a - b).join() === v.join()) { delete picks[k]; if (!posts[k] || base?.posts?.[k]) delete posts[k]; removed.push(k); }
+  }
+  for (const k of Object.keys(posts)) if (!picks[k] && base?.posts?.[k]) delete posts[k];
+  return { manual: { picks, posts }, removed };
+}

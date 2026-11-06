@@ -1,0 +1,43 @@
+name: k3km-picks
+
+# 每天去 9800 論壇抓 K3km8000 的今彩539報號（台灣時間 = UTC+8）。
+# 他多半前一晚 ~22:00 發隔天的號，有時白天才發，所以晚上、早上、中午、傍晚各試一次。
+# 抓不到不會讓 workflow 失敗，資料保留舊的；App「追蹤」頁也可以自己補。
+on:
+  schedule:
+    - cron: '30 15 * * 0-5'   # 週日至週五 23:30（隔天週一至週六要開的那期）
+    - cron: '0 23 * * 0-5'    # 週一至週六 07:00 早上補抓
+    - cron: '30 4 * * 1-6'    # 週一至週六 12:30
+    - cron: '30 10 * * 1-6'   # 週一至週六 18:30（開獎前最後一次）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: k3km-picks
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Fetch K3km8000 picks (best effort)
+        run: node scripts/fetch_k3km_picks.mjs || echo "抓取腳本出錯，保留舊資料"
+      - name: Commit if changed
+        run: |
+          if [ -n "$(git status --porcelain data/k3km8000_picks.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/k3km8000_picks.json
+            git commit -m "data: K3km8000 picks $(TZ=Asia/Taipei date +%F)"
+            for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 5; done
+            echo "::warning::推送失敗"
+          else
+            echo "No changes."
+          fi

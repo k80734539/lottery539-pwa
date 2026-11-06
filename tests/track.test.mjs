@@ -24,4 +24,28 @@ assert.deepEqual(sg.spots.slice(0, 2).map(s => s.pos).sort(), [1, 4]);
 assert.deepEqual(sg.four, [3, 5, 34, 36]);
 assert.equal(sg.spots.find(s => s.pos === 4).nums[0], 34);
 assert.equal(T.suggestNext([1, 2, 3, 4, 39], null).spots[0].nums.join(), '2'); // 邊界：不出 0
+// 自己補報號
+assert.deepEqual(T.parsePicks('38 4,22、12 35'), [4, 12, 22, 35, 38]);
+assert.equal(T.parsePicks('1 1 2 3 4'), null); assert.equal(T.parsePicks('1 2 3 4 40'), null); assert.equal(T.parsePicks([1, 2, 3, 4, '']), null);
+assert.equal(T.parsePostId('http://www.9800.com.tw/bbs/view.asp?id=350158'), 350158); assert.equal(T.parsePostId(''), null);
+assert.equal(T.parseIssue('115000270'), '115270'); assert.equal(T.parseIssue('12'), null);
+const man = { picks: { '115269': [4, 12, 22, 35, 38], '115270': [1, 2, 3, 4, 5] }, posts: { '115270': 9 } };
+const pr = T.pruneManual(kp, man);
+assert.deepEqual(pr.removed, ['115269']); assert.deepEqual(Object.keys(pr.manual.picks), ['115270']);
+const mg = T.mergeManual(kp, pr.manual);
+assert.deepEqual(mg.picks['115270'], [1, 2, 3, 4, 5]); assert.equal(mg.posts['115270'], 9); assert.deepEqual(mg.manual, ['115270']);
+assert.equal(T.buildRows(mg.picks, T.issueMap(L.drawsChrono(map))).at(-1).issue, '115270'); // 建議改用最新自己補的那期
+// 抓取腳本解析（離線樣本）
+const F = await import('../scripts/fetch_k3km_picks.mjs');
+const post = `<title>&#11088;&#65039;11/06&#11088;&#65039;5&#11088;&#65039;3&#11088;&#65039;9&#11088;&#65039;_115269期 - 今彩539討論區</title><a>K3km8000</a>
+  <td>開獎日期：</td><td> 11月 06日(115269期)</td><td>推薦獎號：</td><td>04,12,22,35,38</td>
+  <tr><td>115268期</td><td>01,16,25,28,31,</td><td>5中 1</td></tr>`;
+const pp = F.parsePost(post);
+assert.equal(pp.issue, '115269'); assert.deepEqual(pp.picks, [4, 12, 22, 35, 38]); assert.deepEqual(pp.history, [{ issue: '115268', picks: [1, 16, 25, 28, 31] }]);
+assert.equal(F.parsePost(post.replace(/K3km8000/g, 'someone')), null);
+const lst = F.parseList('<a href="view.asp?id=350117">⭐️11/05⭐️5⭐️3⭐️9⭐️(5中 1)</a><a href="view.asp?id=350158">&#11088;11/06&#11088;5&#11088;3&#11088;9&#11088;</a><a href="view.asp?id=1">⭐️11/05⭐️大樂透</a>');
+assert.deepEqual(lst.map(x => x.id), [350158, 350117]);
+const mr = F.merge(kp, [{ id: 999999, issue: '115270', picks: [1, 2, 3, 4, 5], history: [] }]);
+assert.ok(mr.changed); assert.deepEqual(mr.added, ['115270']); assert.equal(mr.data.posts['115270'], 999999);
+assert.equal(F.merge(kp, [{ id: kp.posts['115269'], issue: '115269', picks: kp.picks['115269'], history: [] }]).changed, false);
 console.log('track tests ok');
