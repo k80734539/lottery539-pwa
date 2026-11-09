@@ -140,8 +140,11 @@ function toast(msg) {
 }
 function fmtDate(d) { const [y, m, day] = d.split('-'); return `${+m}/${+day}（週${L.WEEKDAYS[L.dow(d)]}）`; }
 function balls(nums, opts = {}) {
-  const hit = new Set(opts.hit || []);
-  return `<div class="balls">${nums.map(n => `<span class="ball${opts.small ? ' small' : ''}${opts.draw ? ' draw' : ''}${hit.has(n) ? ' hit' : ''}">${String(n).padStart(2, '0')}</span>`).join('')}</div>`;
+  const hit = new Set(opts.hit || []), near = new Set(opts.near || []);
+  return `<div class="balls">${nums.map(n => {
+    const mark = T.ballMark(n, hit, near); // hit 優先於 near
+    return `<span class="ball${opts.small ? ' small' : ''}${opts.draw ? ' draw' : ''}${mark ? ' ' + mark : ''}">${String(n).padStart(2, '0')}</span>`;
+  }).join('')}</div>`;
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
@@ -676,7 +679,7 @@ function trackRowCard(r) {
   if (!r.draw) return `<div class="pickcard"><div class="row between"><b>${ds} 第 ${r.issue} 期</b><span class="tag warn">等開獎</span></div>
     <div class="row"><span class="small-print">他報</span>${balls(r.picks, { small: true })}</div></div>`;
   return `<div class="pickcard"><div class="row between"><b>${ds} 第 ${r.issue} 期</b>${r.near.length ? `<span class="tag ok">差1 ×${r.near.length}</span>` : '<span class="tag">沒有差1</span>'}</div>
-    <div class="row"><span class="small-print">他報</span>${balls(r.picks, { small: true, hit: r.hits.map(x => x.n) })}</div>
+    <div class="row"><span class="small-print">他報</span>${balls(r.picks, { small: true, hit: r.hits.map(x => x.n), near: r.near.map(x => x.n) })}</div>
     <div class="row" style="margin-top:4px"><span class="small-print">開獎</span>${balls(r.draw, { small: true, draw: true })}</div>
     <div class="small-print" style="margin-top:4px">中：${r.hits.length ? r.hits.map(x => `${POSN[x.pos]} ${pad2(x.n)}`).join('、') : '無'}</div>
     <div class="small-print"><b>差1：${r.near.length ? r.near.map(x => `${POSN[x.pos]} ${pad2(x.n)} ${dirText(x)}`).join('、') : '無'}</b></div></div>`;
@@ -695,8 +698,9 @@ function renderTrack() {
   view.innerHTML = `
   <div class="card"><h2>🔍 追蹤分析：K3km8000</h2><div class="small-print" style="font-size:13px">追蹤 9800 論壇 <a href="${trackData.forum || 'http://www.9800.com.tw/bbs/user.asp?uid=116496'}" target="_blank" rel="noopener">K3km8000</a> 每期報的 5 個號碼，重點看<b>沒中但差 1 號</b>。號碼由小到大排，「第1個～第5個」就是位置。這頁只是參考，跟其他分頁的紀錄分開。</div></div>
   <div class="card"><h2>${pending ? '他最新報號' : '他最近一期報號'}：${lDate ? fmtDate(lDate) : ''} 第 ${latest.issue} 期</h2>
-    ${balls(latest.picks)}
-    <div class="small-print" style="margin-top:6px">${trackData.manual?.includes(latest.issue) ? '（自己補的）' : ''}${postLink(latest.issue) || '（沒有記錄發文連結）'}${pending ? '' : '・這期已開獎，下一期他還沒報（或還沒更新進來，可以在下面「自己補報號」補上）'}</div></div>
+    ${balls(latest.picks, pending ? {} : { hit: latest.hits.map(x => x.n), near: latest.near.map(x => x.n) })}
+    <div class="small-print" style="margin-top:6px">${trackData.manual?.includes(latest.issue) ? '（自己補的）' : ''}${postLink(latest.issue) || '（沒有記錄發文連結）'}${pending ? '' : '・這期已開獎，下一期他還沒報（或還沒更新進來，可以在下面「自己補報號」補上）'}</div>
+    ${pending ? '' : '<div class="small-print">標記：<span class="ball small hit" style="width:22px;height:22px;font-size:11px;vertical-align:middle">中</span> 真的中　<span class="ball small near" style="width:22px;height:22px;font-size:11px;vertical-align:middle">差</span> 差 1（沒中）</div>'}</div>
   ${sg ? `<div class="card"><h2>👀 ${pending ? '隔天可盯' : '照最近一期可盯'}（第 ${latest.issue} 期）</h2>
     <div class="small-print" style="font-size:13px">看最近 ${st.draws} 期：這期有差 1 時，下一期差 1 最常落在 <b>${POSN[sg.spots[0].pos]}</b>、<b>${POSN[sg.spots[1].pos]}</b>。所以盯他這期這兩個位置的 ±1：</div>
     ${sg.spots.map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.main ? '' : '備選・'}${POSN[s.pos]}（他報 ${pad2(s.n)}）</span><span class="small-print">下期差1落這裡 ${s.nextCount} 次</span></div>
@@ -710,6 +714,7 @@ function renderTrack() {
     <div class="tablewrap"><table><thead><tr><th>位置</th><th>差1</th><th>+1</th><th>−1</th><th>下期差1落這裡</th></tr></thead><tbody>${posBar}</tbody></table></div>
     <div class="small-print">「+1」＝開出的比他報的大 1；「−1」＝開出的比他報的小 1。「下期差1落這裡」只算期號連著的上下期：這期有差1（共 ${st.signals} 次），下一期在這個位置又差1的次數；其中下一期也有差1的有 ${st.again} 次。</div></div>
   <div class="card"><h2>🗂️ 每期對照</h2>
+    <div class="small-print" style="margin-bottom:6px">他報號碼：<span class="ball small hit" style="width:22px;height:22px;font-size:11px;vertical-align:middle">中</span> 真的中　<span class="ball small near" style="width:22px;height:22px;font-size:11px;vertical-align:middle">差</span> 差 1（沒中；未開獎不標）</div>
     ${[...rows].reverse().slice(0, trackShown).map(trackRowCard).join('')}
     ${rows.length > trackShown ? `<div class="row" style="margin-top:8px"><button class="grow" data-act="tk-more">再看更早的</button></div>` : ''}
     <div class="small-print" style="margin-top:6px">中間沒列的日期是他沒發文。資料更新：${trackData.updated ? new Date(trackData.updated).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }) : '—'}。</div>

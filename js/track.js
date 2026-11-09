@@ -15,6 +15,15 @@ export function compare(picks, draw) {
   });
   return { hits, near };
 }
+
+/** 球號樣式標記：exact hit 優先於差1；未開獎時兩邊都空就不標 */
+export function ballMark(n, hits = [], near = []) {
+  const H = hits instanceof Set ? hits : new Set(hits);
+  const N = near instanceof Set ? near : new Set(near);
+  if (H.has(n)) return 'hit';
+  if (N.has(n)) return 'near';
+  return '';
+}
 /** 依期別排序的列：{issue, picks, draw|null, date|null, hits, near} */
 export function buildRows(pickMap, imap) {
   return Object.keys(pickMap).sort().map(issue => {

@@ -1,13 +1,13 @@
 :root{
   --bg:#f6f7fb;--card:#fff;--text:#1b1f2a;--muted:#6b7280;--line:#e5e7ee;--accent:#1f4fd8;--accent-t:#fff;
-  --ok:#14804a;--warn:#b45309;--bad:#c62828;--ball:#eef1fb;--ball-t:#1f2a52;--hit:#ffd54a;--hit-t:#3a2b00;--shadow:0 1px 3px rgba(20,30,60,.08);
+  --ok:#14804a;--warn:#b45309;--bad:#c62828;--ball:#eef1fb;--ball-t:#1f2a52;--hit:#ffd54a;--hit-t:#3a2b00;--near:#c8e6c9;--near-t:#14532d;--shadow:0 1px 3px rgba(20,30,60,.08);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:#12141a;--card:#1c1f28;--text:#eceef4;--muted:#9aa1b2;--line:#2b3040;--accent:#6c8cff;--accent-t:#0b1020;
-  --ok:#4cc38a;--warn:#f0a23a;--bad:#ff6b6b;--ball:#272c3b;--ball-t:#dfe5ff;--hit:#f5c542;--hit-t:#241a00;--shadow:none}}
+  --ok:#4cc38a;--warn:#f0a23a;--bad:#ff6b6b;--ball:#272c3b;--ball-t:#dfe5ff;--hit:#f5c542;--hit-t:#241a00;--near:#1b4332;--near-t:#b7f0c2;--shadow:none}}
 :root[data-theme=dark]{
   --bg:#12141a;--card:#1c1f28;--text:#eceef4;--muted:#9aa1b2;--line:#2b3040;--accent:#6c8cff;--accent-t:#0b1020;
-  --ok:#4cc38a;--warn:#f0a23a;--bad:#ff6b6b;--ball:#272c3b;--ball-t:#dfe5ff;--hit:#f5c542;--hit-t:#241a00;--shadow:none}
+  --ok:#4cc38a;--warn:#f0a23a;--bad:#ff6b6b;--ball:#272c3b;--ball-t:#dfe5ff;--hit:#f5c542;--hit-t:#241a00;--near:#1b4332;--near-t:#b7f0c2;--shadow:none}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
 body{padding:0 max(14px,env(safe-area-inset-right)) calc(76px + env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
@@ -37,6 +37,7 @@ label.field{display:block;margin:8px 0;font-size:14px}
 .balls{display:flex;gap:6px;flex-wrap:nowrap}
 .ball{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:var(--ball);color:var(--ball-t);font-weight:700;font-variant-numeric:tabular-nums;font-size:15px;border:2px solid transparent}
 .ball.hit{background:var(--hit);color:var(--hit-t);border-color:#e0a800}
+.ball.near{background:var(--near);color:var(--near-t);border-color:var(--ok)}
 .ball.draw{background:var(--accent);color:var(--accent-t)}
 .ball.small{width:30px;height:30px;font-size:13px}
 .setrow{border-top:1px solid var(--line);padding:10px 0}

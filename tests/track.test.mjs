@@ -34,7 +34,7 @@ const pr = T.pruneManual(kp, man);
 assert.deepEqual(pr.removed, ['115269']); assert.deepEqual(Object.keys(pr.manual.picks), ['115270']);
 const mg = T.mergeManual(kp, pr.manual);
 assert.deepEqual(mg.picks['115270'], [1, 2, 3, 4, 5]); assert.equal(mg.posts['115270'], 9); assert.deepEqual(mg.manual, ['115270']);
-assert.equal(T.buildRows(mg.picks, T.issueMap(L.drawsChrono(map))).at(-1).issue, '115270'); // 建議改用最新自己補的那期
+assert.equal(T.buildRows(mg.picks, T.issueMap(L.drawsChrono(map))).at(-1).issue, Object.keys(mg.picks).sort().at(-1)); // 最新期（含自己補覆蓋）
 // 抓取腳本解析（離線樣本）
 const F = await import('../scripts/fetch_k3km_picks.mjs');
 const post = `<title>&#11088;&#65039;11/06&#11088;&#65039;5&#11088;&#65039;3&#11088;&#65039;9&#11088;&#65039;_115269期 - 今彩539討論區</title><a>K3km8000</a>
@@ -48,4 +48,16 @@ assert.deepEqual(lst.map(x => x.id), [350158, 350117]);
 const mr = F.merge(kp, [{ id: 999999, issue: '115270', picks: [1, 2, 3, 4, 5], history: [] }]);
 assert.ok(mr.changed); assert.deepEqual(mr.added, ['115270']); assert.equal(mr.data.posts['115270'], 999999);
 assert.equal(F.merge(kp, [{ id: kp.posts['115269'], issue: '115269', picks: kp.picks['115269'], history: [] }]).changed, false);
+
+// 球號標記：差1 綠、真中優先、未開獎不標
+assert.equal(T.ballMark(22, [32], [22, 35]), 'near');
+assert.equal(T.ballMark(32, [32], [22, 35]), 'hit');
+assert.equal(T.ballMark(35, [32], [22, 35]), 'near');
+assert.equal(T.ballMark(4, [32], [22, 35]), '');
+assert.equal(T.ballMark(22, [], []), ''); // 等開獎
+const ex = T.compare([4, 15, 22, 32, 35], [10, 21, 24, 32, 34]);
+assert.deepEqual(ex.hits.map(x => x.n), [32]);
+assert.deepEqual(ex.near.map(x => x.n).sort((a,b)=>a-b), [22, 35]);
+assert.equal(T.ballMark(22, ex.hits.map(x => x.n), ex.near.map(x => x.n)), 'near');
+assert.equal(T.ballMark(32, ex.hits.map(x => x.n), ex.near.map(x => x.n)), 'hit');
 console.log('track tests ok');
