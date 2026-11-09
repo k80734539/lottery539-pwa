@@ -1,0 +1,44 @@
+name: lehe-picks
+
+# 每天替 39樂合彩鎖定建議②比較常中（二合×2＋三合×2；台灣時間 10:00，週一至週六）。
+# 與擂台 arena-picks 同早班；只用已開完的獎號，開獎日 20:30 後不補當期。
+on:
+  schedule:
+    - cron: '0 2 * * 1-6'    # 10:00 台灣時間
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lehe-picks
+  cancel-in-progress: false
+
+jobs:
+  picks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Refresh results first (best effort)
+        run: python scripts/update_results.py --months 2 || true
+      - name: Lock next 樂合建議②
+        run: node scripts/lehe_picks.mjs
+      - name: Commit data if changed
+        run: |
+          if [ -n "$(git status --porcelain data/results.json data/lehe_picks.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/results.json data/lehe_picks.json
+            git commit -m "data: lehe sug_b picks $(TZ=Asia/Taipei date +%F)"
+            for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 5; done
+            echo "::warning::推送失敗"
+          else
+            echo "No changes."
+          fi

@@ -41,3 +41,32 @@ console.log('lehe tests ok');
   for (let j = n.length - 100; j < n.length; j++) { const c = new Array(40).fill(0); for (let k = j - 30; k < j; k++) for (const x of n[k]) c[x]++; const l = n[j - 1].slice().sort((a, b) => c[b] - c[a] || a - b); assert.deepEqual(suggest(n.slice(0, j), ch[j].date).pair, [l[0], l[1]]); }
   console.log('lehe suggest ok');
 }
+
+{
+  const { suggest, buildSugB } = await import('../js/suggest.js');
+  const fs = await import('node:fs'); const L = await import('../js/logic.js');
+  const rd = f => JSON.parse(fs.readFileSync(new URL('../data/' + f, import.meta.url)));
+  const ch = L.drawsChrono(L.buildDrawMap(rd('history.json').draws, rd('results.json').draws, {}));
+  const date = '2026-11-09';
+  const past = ch.filter(d => d.date < date);
+  const g = suggest(past.map(d => d.numbers), date);
+  const sets = buildSugB(g, date);
+  assert.equal(sets.length, 3);
+  assert.deepEqual(sets[0], { id: 'sug_b:2026-11-09:pair', numbers: [24, 32], plays: [2], mult: 2 });
+  assert.equal(sets[1].plays[0], 3); assert.equal(sets[1].numbers.length, 3);
+  assert.equal(sets[2].plays[0], 3);
+  // 只用目標日之前的獎號：多塞一筆當日假開獎也不該改變建議
+  const leak = suggest([...past.map(d => d.numbers), [1, 2, 3, 4, 5]], date);
+  assert.notDeepEqual(buildSugB(leak, date)[0].numbers, sets[0].numbers); // 若誤用當日會不同；腳本必須先 filter
+  const g2 = suggest(past.map(d => d.numbers), date);
+  assert.deepEqual(buildSugB(g2, date), sets);
+  // 與手動 lh-sug b 結構一致
+  assert.equal(sets[0].mult, 2); assert.equal(sets.filter(s => s.plays[0] === 3).length, 2);
+  // 鎖定檔存在且不可覆寫語意：同日再跑腳本應 exists（整合測由腳本 exit 驗證）
+  const pack = rd('lehe_picks.json').entries.find(e => e.drawDate === date);
+  assert.ok(pack); assert.equal(pack.template, 'sug_b'); assert.equal(pack.sets.length, 3);
+  assert.equal(pack.bought, undefined); // 花費由 App 合併時 bought:false
+  assert.deepEqual(pack.sets[0].numbers, [24, 32]);
+  console.log('lehe sug_b auto lock ok');
+}
+

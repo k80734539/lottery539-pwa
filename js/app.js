@@ -72,6 +72,7 @@ async function sync(manual = false) {
     }
   } catch (e) { /* 官網失敗：保留 results.json／已存資料 */ }
   await mergeServerArena();
+  await mergeServerLehe();
   await ensureArena();
   render();
 }
@@ -128,6 +129,45 @@ async function mergeServerArena() {
       if (!same && (!A.entryCounts(le) || Date.parse(se.lockedAt) < Date.parse(le.lockedAt))) { S.state.arena.entries[i] = entry; changed = true; }
       // 伺服器替同一筆紀錄補上了「你的策略」：本機還沒有就一起採用
       else if (sameBase && A.origCounts(se) && !A.origCounts(le)) { S.state.arena.entries[i] = { ...le, picks: { ...le.picks, ...se.picks }, origLockedAt: se.origLockedAt, origFp: se.origFp, origHistCount: se.origHistCount }; changed = true; }
+    }
+    if (changed) S.save();
+  } catch {}
+}
+
+/** 合併伺服器每日鎖定的樂合建議②：本機尚無同 id 就補上；不覆寫已有紀錄；bought 固定 false（可之後手動勾有買）。 */
+async function mergeServerLehe() {
+  try {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch('data/lehe_picks.json?t=' + Date.now(), { cache: 'no-store', signal: ctl.signal }); clearTimeout(to);
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!Array.isArray(j.entries)) return;
+    let changed = false;
+    const have = new Set(S.state.lehe.entries.map(e => e.id));
+    for (const pack of j.entries) {
+      if (!pack || !/^\d{4}-\d{2}-\d{2}$/.test(pack.drawDate) || !Array.isArray(pack.sets) || !pack.sets.length) continue;
+      for (const s of pack.sets) {
+        if (!s?.id || have.has(s.id)) continue;
+        if (!Array.isArray(s.numbers) || s.numbers.length < 2) continue;
+        S.state.lehe.entries.push({
+          id: s.id,
+          drawDate: pack.drawDate,
+          numbers: s.numbers.slice().sort((a, b) => a - b),
+          plays: (s.plays || [2]).slice(),
+          mult: s.mult || 1,
+          bought: false,
+          source: 'sug_b',
+          server: true,
+          createdAt: pack.lockedAt || new Date().toISOString(),
+          lockedAt: pack.lockedAt || null,
+          late: false,
+          histLast: pack.histLast || null,
+          histCount: pack.histCount || null,
+          fp: pack.fp || null,
+        });
+        have.add(s.id);
+        changed = true;
+      }
     }
     if (changed) S.save();
   } catch {}
@@ -544,7 +584,7 @@ function leheSheet({ date, initial = [], plays = [2], bought = true, source = 'm
 }
 function leheEntryCard(e) {
   const d = drawMap.get(e.drawDate); const r = H.settle(e, d, LS());
-  const name = e.source === 'manual' ? '自選' : e.source === 'sug_a' ? '建議①最少虧' : e.source === 'sug_b' ? '建議②比較常中' : e.source === 'k3km' ? '追蹤：K3km8000 隔天可盯' : '擂台：' + A.nameOf(e.source);
+  const name = e.source === 'manual' ? '自選' : e.source === 'sug_a' ? '建議①最少虧' : e.source === 'sug_b' ? (e.server ? '建議②比較常中（自動鎖定）' : '建議②比較常中') : e.source === 'k3km' ? '追蹤：K3km8000 隔天可盯' : '擂台：' + A.nameOf(e.source);
   const tag = r ? (r.win > 0 ? `<span class="tag ok">中獎 ${L.money(r.win)}</span>` : (e.bought === false && Object.values(r.byPlay).some(p => p.hits) ? '<span class="tag ok">有對中（沒買）</span>' : '<span class="tag">已對獎</span>')) : '<span class="tag warn">等開獎</span>';
   const plays = e.plays.map(k => {
     const p = r?.byPlay[k];
@@ -554,7 +594,8 @@ function leheEntryCard(e) {
     <div class="small-print">${name}${e.bought === false ? '・沒買（不計花費）' : `・花費 ${L.money(H.entryCost(e, LS()))}`}${e.late ? '・開獎截止後補登' : ''}</div>
     ${r ? `<div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(r.draw.numbers, { small: true, draw: true })}</div>` : ''}
     ${balls(e.numbers, { small: true, hit: r?.hitNumbers })}${plays}
-    <div class="row" style="margin-top:6px"><button class="small" data-act="lh-toggle" data-id="${e.id}">切換「有買／沒買」</button><button class="small" data-act="lh-copy" data-id="${e.id}">📋 複製</button>${r ? '' : `<button class="small danger" data-act="lh-del" data-id="${e.id}">刪除</button>`}</div></div>`;
+    ${e.server && e.lockedAt ? `<div class="small-print">自動鎖定於 ${new Date(e.lockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間）${e.fp ? '・指紋 ' + e.fp : ''}${e.histLast ? '・用到 ' + e.histLast + ' 為止' : ''}</div>` : ''}
+    <div class="row" style="margin-top:6px"><button class="small" data-act="lh-toggle" data-id="${e.id}">切換「有買／沒買」</button><button class="small" data-act="lh-copy" data-id="${e.id}">📋 複製</button>${r || e.server ? '' : `<button class="small danger" data-act="lh-del" data-id="${e.id}">刪除</button>`}</div></div>`;
 }
 function renderLehe() {
   const ent = S.state.lehe.entries; const st = LS();
@@ -571,12 +612,23 @@ function renderLehe() {
     <div class="row"><button class="primary grow" data-act="lh-new">✍️ 自選號碼</button></div>
     <div class="small-print" style="margin-top:8px">或從擂台策略帶入這期的 4 碼：</div>
     ${arenaEn ? `<div class="row" style="margin-top:4px">${A.ARENA.map(s => `<button class="small" data-act="lh-arena" data-id="${s.id}">${s.name}</button>`).join('')}</div>` : '<div class="small-print">擂台這期的選號還沒建立。</div>'}</div>
-  <div class="card"><h2>⭐ 建議買法（${fmtDate(next)}）</h2>${(() => { const g = suggest(drawChrono.map(d => d.numbers), next); if (!g) return '<div class="muted">資料不足。</div>'; return `
+  ${(() => {
+    const auto = ent.filter(e => e.drawDate === next && e.source === 'sug_b' && e.server);
+    if (!auto.length) return '';
+    const lockAt = auto[0].lockedAt;
+    return `<div class="card"><h2>🔒 今日自動鎖定：建議②比較常中（${fmtDate(next)}）</h2>
+      <div class="small-print">伺服器已於 ${lockAt ? new Date(lockAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }) : '—'}（台灣時間）鎖定・預設「沒買」（不計花費；有買可在紀錄裡勾選）${auto[0].fp ? '・指紋 <code>' + auto[0].fp + '</code>' : ''}</div>
+      ${auto.map(e => `<div class="pickcard"><div class="row between"><span class="sname">${H.PLAY_NAME[e.plays[0]]} ×${e.mult || 1}</span><span class="tag ok">已鎖定</span></div>${balls(e.numbers)}</div>`).join('')}
+    </div>`;
+  })()}
+  <div class="card"><h2>⭐ 建議買法（${fmtDate(next)}）</h2>${(() => { const g = suggest(drawChrono.map(d => d.numbers), next); if (!g) return '<div class="muted">資料不足。</div>';
+    const hasAutoB = ent.some(e => e.drawDate === next && e.source === 'sug_b' && e.server);
+    return `
     <div class="pickcard"><div class="row between"><span class="sname">① 最少虧：二合 ×4（NT$${4 * st.price}）</span><button class="small primary" data-act="lh-sug" data-k="a">＋加入紀錄</button></div>
     ${balls(g.pair)}<div class="small-print">上期 5 碼裡，近 30 期最常開的 2 個（${g.pair.map(x => `${String(x).padStart(2, "0")}開${g.counts[x]}次`).join('、')}），同一組買 4 注。回測最少虧。</div></div>
-    <div class="pickcard"><div class="row between"><span class="sname">② 比較常中：二合 ×2 ＋ 三合 2 組（NT$${4 * st.price}）</span><button class="small primary" data-act="lh-sug" data-k="b">＋加入紀錄</button></div>
+    <div class="pickcard"><div class="row between"><span class="sname">② 比較常中：二合 ×2 ＋ 三合 2 組（NT$${4 * st.price}）</span>${hasAutoB ? '<span class="tag ok">已自動鎖定</span>' : '<button class="small primary" data-act="lh-sug" data-k="b">＋加入紀錄</button>'}</div>
     <div class="row">二合 ×2 ${balls(g.pair, { small: true })}</div>${g.tris.map(t => `<div class="row">三合 ${balls(t, { small: true })}</div>`).join('')}
-    <div class="small-print">同一對買 2 注，再從多模型加權（原版）的 4 碼 ${L.fmtNums(g.weighted)} 挑最熱的 2 組三合。槓龜期較短，但平均虧比①多。</div></div>`; })()}</div>
+    <div class="small-print">同一對買 2 注，再從多模型加權（原版）的 4 碼 ${L.fmtNums(g.weighted)} 挑最熱的 2 組三合。槓龜期較短，但平均虧比①多。${hasAutoB ? '伺服器每天早上會自動鎖定這一組（預設沒買）。' : ''}</div></div>`; })()}</div>
   <div class="card"><h2>累計成績</h2><div class="tiles">
     <div class="tile">累計花費（已開獎）<b>${L.money(sm.spent)}</b></div><div class="tile">累計獎金<b>${L.money(sm.won)}</b></div>
     <div class="tile">淨損益<b class="${sm.won - sm.spent >= 0 ? 'pos' : 'neg'}">${L.money(sm.won - sm.spent)}</b></div><div class="tile">已對獎筆數<b>${sm.settled}</b></div></div>
@@ -611,6 +663,7 @@ async function onLeheClick(e) {
   if (act === 'chart-lh') { G.toggle(hiddenLh, t.dataset.id, A.ARENA_IDS); const y = window.scrollY; render(); window.scrollTo(0, y); return; }
   if (act === 'lh-sug') {
     const g = suggest(drawChrono.map(d => d.numbers), next); if (!g) return;
+    if (t.dataset.k === 'b' && S.state.lehe.entries.some(e => e.drawDate === next && e.source === 'sug_b' && e.server)) { toast('建議②已由伺服器自動鎖定'); return; }
     const now = new Date(), mk = (numbers, plays, mult, source) => ({ id: now.getTime().toString(36) + Math.random().toString(36).slice(2, 6), drawDate: next, numbers, plays, mult, bought: true, source, createdAt: now.toISOString(), late: now >= L.cutoffInstant(next) });
     const add = t.dataset.k === 'a' ? [mk(g.pair, [2], 4, 'sug_a')] : [mk(g.pair, [2], 2, 'sug_b'), ...g.tris.map(x => mk(x, [3], 1, 'sug_b'))];
     S.state.lehe.entries.push(...add); S.save(); render(); toast(`已加入 ${add.length} 筆紀錄`); return;
@@ -621,7 +674,7 @@ async function onLeheClick(e) {
     leheSheet({ date: next, initial: a.picks[t.dataset.id], plays: [2, 3, 4], source: t.dataset.id, title: `帶入：${A.nameOf(t.dataset.id)}` });
   } else if (act === 'lh-toggle' && en) { en.bought = en.bought === false; S.save(); render(); toast(en.bought ? '改為「有買」' : '改為「沒買」（不計花費）'); }
   else if (act === 'lh-copy' && en) copyText(L.fmtNums(en.numbers));
-  else if (act === 'lh-del' && en && await confirmSheet('<p>確定刪除這筆樂合彩紀錄？</p>', '刪除')) { S.state.lehe.entries = S.state.lehe.entries.filter(x => x !== en); S.save(); render(); }
+  else if (act === 'lh-del' && en) { if (en.server) return toast('自動鎖定的建議②不可刪除'); if (await confirmSheet('<p>確定刪除這筆樂合彩紀錄？</p>', '刪除')) { S.state.lehe.entries = S.state.lehe.entries.filter(x => x !== en); S.save(); render(); } }
   else if (act === 'lh-reset') { S.state.lehe.settings = JSON.parse(JSON.stringify(H.DEFAULT_SETTINGS)); S.save(); render(); toast('已恢復預設'); }
 }
 

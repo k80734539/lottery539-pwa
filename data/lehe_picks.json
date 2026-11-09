@@ -1,0 +1,52 @@
+{
+ "note": "伺服器每日自動鎖定的樂合建議②比較常中（二合×2＋三合×2；GitHub Actions，開獎日 20:30 前）。bought 預設 false，不計花費。",
+ "template": "sug_b",
+ "entries": [
+  {
+   "drawDate": "2026-11-09",
+   "lockedAt": "2026-11-09T05:19:28.089Z",
+   "template": "sug_b",
+   "histLast": "2026-11-07",
+   "histCount": 1361,
+   "fp": "7ca3111471f1",
+   "sets": [
+    {
+     "id": "sug_b:2026-11-09:pair",
+     "numbers": [
+      24,
+      32
+     ],
+     "plays": [
+      2
+     ],
+     "mult": 2
+    },
+    {
+     "id": "sug_b:2026-11-09:tri0",
+     "numbers": [
+      2,
+      17,
+      32
+     ],
+     "plays": [
+      3
+     ],
+     "mult": 1
+    },
+    {
+     "id": "sug_b:2026-11-09:tri1",
+     "numbers": [
+      2,
+      13,
+      32
+     ],
+     "plays": [
+      3
+     ],
+     "mult": 1
+    }
+   ]
+  }
+ ],
+ "updated": "2026-11-09T05:19:28.089Z"
+}

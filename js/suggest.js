@@ -14,3 +14,15 @@ export function suggest(nums, date) {
   const tris = sub(w.slice().sort((a, b) => a - b), 3).sort((x, y) => heat(y, c) - heat(x, c) || (x.join() < y.join() ? -1 : 1)).slice(0, 2);
   return { pair, weighted: w, tris, counts: Object.fromEntries(nums.at(-1).map(x => [x, c[x]])) };
 }
+
+/** 建議②比較常中：二合×2 + 三合 2 組（與 App「＋加入紀錄」相同結構） */
+export function buildSugB(g, drawDate) {
+  if (!g?.pair || !Array.isArray(g.tris) || g.tris.length < 2) return null;
+  const sort = a => a.slice().sort((x, y) => x - y);
+  return [
+    { id: `sug_b:${drawDate}:pair`, numbers: sort(g.pair), plays: [2], mult: 2 },
+    { id: `sug_b:${drawDate}:tri0`, numbers: sort(g.tris[0]), plays: [3], mult: 1 },
+    { id: `sug_b:${drawDate}:tri1`, numbers: sort(g.tris[1]), plays: [3], mult: 1 },
+  ];
+}
+
