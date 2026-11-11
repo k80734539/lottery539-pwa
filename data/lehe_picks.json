@@ -91,7 +91,52 @@
      "mult": 1
     }
    ]
+  },
+  {
+   "drawDate": "2026-11-11",
+   "lockedAt": "2026-11-11T08:46:09.770Z",
+   "template": "sug_b",
+   "histLast": "2026-11-10",
+   "histCount": 1363,
+   "fp": "811f0ebc342c",
+   "sets": [
+    {
+     "id": "sug_b:2026-11-11:pair",
+     "numbers": [
+      19,
+      24
+     ],
+     "plays": [
+      2
+     ],
+     "mult": 2
+    },
+    {
+     "id": "sug_b:2026-11-11:tri0",
+     "numbers": [
+      2,
+      17,
+      28
+     ],
+     "plays": [
+      3
+     ],
+     "mult": 1
+    },
+    {
+     "id": "sug_b:2026-11-11:tri1",
+     "numbers": [
+      2,
+      28,
+      29
+     ],
+     "plays": [
+      3
+     ],
+     "mult": 1
+    }
+   ]
   }
  ],
- "updated": "2026-11-10T09:06:47.264Z"
+ "updated": "2026-11-11T08:46:09.770Z"
 }
