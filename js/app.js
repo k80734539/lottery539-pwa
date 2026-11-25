@@ -181,11 +181,27 @@ function toast(msg) {
 function fmtDate(d) { const [y, m, day] = d.split('-'); return `${+m}/${+day}（週${L.WEEKDAYS[L.dow(d)]}）`; }
 function balls(nums, opts = {}) {
   const hit = new Set(opts.hit || []), near = new Set(opts.near || []);
-  return `<div class="balls">${nums.map(n => {
+  const rec = opts.repeat || {};
+  const hasRep = nums.some(n => (rec[n] || 0) >= 2);
+  return `<div class="balls${hasRep ? ' has-rep' : ''}">${nums.map(n => {
     const mark = T.ballMark(n, hit, near); // hit 優先於 near
-    return `<span class="ball${opts.small ? ' small' : ''}${opts.draw ? ' draw' : ''}${mark ? ' ' + mark : ''}">${String(n).padStart(2, '0')}</span>`;
+    const cnt = rec[n] || 0;
+    const rmark = A.repeatMark(cnt, mark === 'hit');
+    const title = rmark ? ` title="${rmark === 'repeat-hit' ? `有 ${cnt} 個策略選了這顆，而且開出` : `有 ${cnt} 個策略選了這顆`}"` : '';
+    const badge = rmark ? `<sup class="rep">×${cnt}</sup>` : '';
+    return `<span class="ball${opts.small ? ' small' : ''}${opts.draw ? ' draw' : ''}${mark ? ' ' + mark : ''}${rmark ? ' ' + rmark : ''}"${title}>${String(n).padStart(2, '0')}${badge}</span>`;
   }).join('')}</div>`;
 }
+function repeatLine(picks, drawNums) {
+  const reps = A.repeatsOf(picks, drawNums || null);
+  if (!reps.length) return `<div class="repeat-line small-print">這期沒有被兩個以上策略同時選到的號碼。</div>`;
+  const items = reps.map(r => `<span class="rep-sum${r.hit ? ' hit' : ''}">${String(r.n).padStart(2, '0')}×${r.count}</span>`).join('、');
+  return `<div class="repeat-line"><span class="small-print">重複號：</span>${items}</div>`;
+}
+const REPEAT_LEGEND = `<div class="repeat-legend">
+  <div class="row" style="gap:10px;margin:6px 0;align-items:center"><span class="ball small repeat">重<sup class="rep">×3</sup></span><span class="small-print">右上角紫色 ×N：有 N 個策略都選了這顆（開獎前就能看）</span></div>
+  <div class="row" style="gap:10px;margin:6px 0;align-items:center"><span class="ball small hit repeat-hit">中<sup class="rep">×5</sup></span><span class="small-print">黃球＋橘色小標：重複選到又開出來了（重複又中）</span></div>
+</div>`;
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
   catch {
@@ -495,12 +511,15 @@ function renderArena() {
   if (arenaTab === 'today') {
     const date = L.nextDrawDate();
     const e = S.state.arena.entries.find(x => x.drawDate === date);
+    const todayDraw = e && drawMap.get(date);
+    const todayRep = e ? A.pickCounts(e.picks) : {};
     body = e ? `<div class="card"><div class="row between"><h2 style="margin:0">${fmtDate(date)} 的 ${A.ARENA.filter(s => e.picks[s.id]).length} 組</h2><span class="tag ok">已自動鎖定</span></div>
       <div class="small-print">鎖定於 ${new Date(e.lockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間）・指紋 <code>${e.fp}</code>・使用到 ${e.histLast || '—'} 為止的 ${e.histCount} 期資料（只看過去）</div>
       ${e.origLockedAt ? `<div class="small-print">「你的策略」補上於 ${new Date(e.origLockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間，仍在 20:30 前）・指紋 <code>${e.origFp}</code></div>` : ''}
       ${!A.origCounts(e) ? '<div class="small-print">這期紀錄建立時還沒有「你的策略」，且已過 20:30 無法補上，下一期開始才有。</div>' : ''}
+      ${repeatLine(e.picks, todayDraw && todayDraw.numbers)}${REPEAT_LEGEND}
       ${A.ARENA.filter(s => e.picks[s.id]).map(s => `${s.id === A.ORIG_IDS[0] ? '<h3 style="margin:14px 0 4px">你的策略（原版 Python 專案的 8 個每日策略，取排名1那組 4 碼）</h3>' : ''}<div class="pickcard"><div class="row between"><span><span class="sname">${s.name}</span> <span class="tag ${s.kind === 'baseline' ? '' : 'ok'}">${s.kind === 'baseline' ? '基準' : s.kind === 'original' ? '原版' : '新'}</span></span><button class="small" data-act="acopy" data-id="${s.id}">📋 複製</button></div>
-        <div class="small-print">${s.desc}</div>${balls(e.picks[s.id], { small: true })}</div>`).join('')}</div>` : '<div class="card muted">正在建立今天的選號…</div>';
+        <div class="small-print">${s.desc}</div>${balls(e.picks[s.id], { small: true, hit: todayDraw ? e.picks[s.id].filter(n => todayDraw.numbers.includes(n)) : [], repeat: todayRep })}</div>`).join('')}</div>` : '<div class="card muted">正在建立今天的選號…</div>';
     body += `<p class="small-print">每個策略的選號由「開獎日＋策略名」決定亂數種子，同一份歷史資料一定產生同一組，並在開獎日 20:30（台灣時間）前記錄鎖定。若某天沒打開 App，就沒有那天的即時紀錄（不會事後補，以免作弊）；歷史則由回測涵蓋。</p>`;
   } else if (arenaTab === 'live') {
     const { dist, settled } = arenaSettled();
@@ -513,8 +532,10 @@ function renderArena() {
       ${settled.length ? `<div class="alert ${verdict.kind === 'diff' ? 'warn' : 'info'}">${verdict.text}</div>` : ''}
       <div class="small-print">95% 區間為平均命中的信賴區間；校正 p 為 Holm 多重比較校正後的最小 p 值（z 檢定與卡方）。理論隨機基準 ${A.MEAN4.toFixed(4)} 若落在區間內，就看不出差異。</div></div>
       ${settled.length ? (() => { const c = liveCurve(settled); return arenaChart(c.dates, c.byId, hiddenLive, 'chart-live', `共 ${settled.length} 期即時紀錄。期數少時線會劇烈跳動，這是正常的運氣波動。`); })() : ''}
-      ${settled.slice(0, 60).map((st, i) => `<details class="card"${i === 0 ? ' open' : ''}><summary><b>${fmtDate(st.date)}</b>${i === 0 ? '（最近一期）' : ''} <span class="small-print">最佳 ${Math.max(...Object.values(st.hits))} 顆</span></summary><div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(st.draw.numbers, { small: true, draw: true })}</div>
-      ${A.ARENA.filter(s => st.hits[s.id] !== undefined).map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${st.hits[s.id] >= 2 ? 'ok' : ''}">中 ${st.hits[s.id]} 顆</span></div>${balls(st.picks[s.id], { small: true, hit: st.picks[s.id].filter(n => st.draw.numbers.includes(n)) })}</div>`).join('')}</details>`).join('')}`;
+      ${settled.length ? `<div class="card">${REPEAT_LEGEND}</div>` : ''}
+      ${settled.slice(0, 60).map((st, i) => { const rec = A.pickCounts(st.picks); return `<details class="card"${i === 0 ? ' open' : ''}><summary><b>${fmtDate(st.date)}</b>${i === 0 ? '（最近一期）' : ''} <span class="small-print">最佳 ${Math.max(...Object.values(st.hits))} 顆</span></summary><div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(st.draw.numbers, { small: true, draw: true })}</div>
+      ${repeatLine(st.picks, st.draw.numbers)}
+      ${A.ARENA.filter(s => st.hits[s.id] !== undefined).map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${st.hits[s.id] >= 2 ? 'ok' : ''}">中 ${st.hits[s.id]} 顆</span></div>${balls(st.picks[s.id], { small: true, hit: st.picks[s.id].filter(n => st.draw.numbers.includes(n)), repeat: rec })}</div>`).join('')}</details>`; }).join('')}`;
   } else {
     if (!arenaBt) {
       body = `<div class="card"><h2>歷史回測（walk-forward）</h2><div class="small-print">對全部 ${drawChrono.length.toLocaleString()} 期歷史逐期往前走：每一期都只用「該期以前」的資料讓每個策略選 4 碼，再和該期實際開獎比。前 ${A.WARMUP} 期當暖身不計分。</div>

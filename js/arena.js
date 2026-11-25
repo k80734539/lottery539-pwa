@@ -178,6 +178,33 @@ export const VAR4 = P4.reduce((a, p, k) => a + p * (k - MEAN4) ** 2, 0);
 
 export function hits(pick, draw) { const s = new Set(draw); return pick.filter(n => s.has(n)).length; }
 
+/** 該期各號碼被幾個策略選到（同一策略重複出現只算一次）。 */
+export function pickCounts(picks = {}) {
+  const c = Object.create(null);
+  for (const nums of Object.values(picks)) {
+    if (!Array.isArray(nums)) continue;
+    for (const n of new Set(nums)) {
+      const k = +n;
+      if (!Number.isInteger(k)) continue;
+      c[k] = (c[k] || 0) + 1;
+    }
+  }
+  return c;
+}
+/** 被 2 個以上策略選到的號碼，依次數高到低、同次數由小到大。draw 有給時標記 hit。 */
+export function repeatsOf(picks, draw = null) {
+  const counts = pickCounts(picks);
+  const hit = draw ? new Set(draw) : null;
+  return Object.keys(counts).map(Number).filter(n => counts[n] >= 2)
+    .sort((a, b) => counts[b] - counts[a] || a - b)
+    .map(n => hit ? { n, count: counts[n], hit: hit.has(n) } : { n, count: counts[n] });
+}
+/** 球上的重複記號：開獎前 / 沒中是 'repeat'，重複又中是 'repeat-hit'，否則 ''。 */
+export function repeatMark(count, hit = false) {
+  if (!(count >= 2)) return '';
+  return hit ? 'repeat-hit' : 'repeat';
+}
+
 // ---------- 統計 ----------
 function erfc(x) { // Numerical Recipes erfcc，相對誤差 < 1.2e-7
   const z = Math.abs(x), t = 1 / (1 + 0.5 * z);
