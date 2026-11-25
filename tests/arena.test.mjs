@@ -155,20 +155,17 @@ for (const fx of PY_FIXTURES) {
 }
 console.log('original strategies ok');
 
-// 每期策略重複號
+// 每期策略重複號（方塊只列 3 個以上、最多 8 顆）
 {
   const picks = { a: [1, 2, 3, 4], b: [1, 5, 6, 7], c: [1, 2, 8, 9], d: [10, 11, 12, 13] };
   assert.equal(A.pickCounts(picks)[1], 3);
   assert.equal(A.pickCounts(picks)[2], 2);
   assert.equal(A.pickCounts(picks)[3], 1);
-  assert.equal(A.repeatMark(1), '');
-  assert.equal(A.repeatMark(2, false), 'repeat');
-  assert.equal(A.repeatMark(5, true), 'repeat-hit');
-  const undrawn = A.repeatsOf(picks);
-  assert.deepEqual(undrawn, [{ n: 1, count: 3 }, { n: 2, count: 2 }]);
-  const drawn = A.repeatsOf(picks, [1, 8, 10, 11, 12]);
-  assert.deepEqual(drawn, [{ n: 1, count: 3, hit: true }, { n: 2, count: 2, hit: false }]);
-  // 同一策略重複列出同一碼只算一次
+  assert.deepEqual(A.repeatsOf(picks), [{ n: 1, count: 3 }, { n: 2, count: 2 }]);
+  assert.deepEqual(A.repeatsOf(picks, null, 3), [{ n: 1, count: 3 }]);
+  assert.deepEqual(A.repeatHighlights(picks), [{ n: 1, count: 3 }]);
+  assert.deepEqual(A.repeatsOf(picks, [1, 8, 10, 11, 12], 3), [{ n: 1, count: 3, hit: true }]);
+  assert.equal(A.repeatHighlights({}).length, 0);
   assert.equal(A.pickCounts({ a: [7, 7, 8, 9], b: [7, 1, 2, 3] })[7], 2);
 }
 
@@ -177,33 +174,23 @@ console.log('original strategies ok');
   const e24 = entries.find(x => x.drawDate === '2026-11-24');
   assert.ok(e24 && Object.keys(e24.picks).length === 20);
   const draw24 = [15, 19, 23, 24, 39];
-  const r24 = A.repeatsOf(e24.picks, draw24);
-  const byN = Object.fromEntries(r24.map(r => [r.n, r]));
-  assert.equal(byN[30].count, 7); assert.equal(byN[30].hit, false);
-  assert.equal(byN[28].count, 6); assert.equal(byN[28].hit, false);
-  assert.equal(byN[15].count, 5); assert.equal(byN[15].hit, true);
-  assert.equal(byN[39].count, 3); assert.equal(byN[39].hit, true);
-  assert.equal(byN[7].count, 5);
-  // 開出但只有 0–1 個策略選到的，不算重複又中
-  assert.equal(byN[19], undefined);
-  assert.equal(byN[23], undefined);
-  assert.equal(byN[24], undefined);
-  const hitReps = r24.filter(r => r.hit).map(r => r.n);
-  assert.deepEqual(hitReps, [15, 39]);
-  // 與 results.json 的 115284 一致
+  const box24 = A.repeatHighlights(e24.picks, draw24);
+  assert.equal(box24.length, 8);
+  assert.deepEqual(box24.map(r => [r.n, r.count, r.hit]), [
+    [30, 7, false], [28, 6, false], [7, 5, false], [15, 5, true],
+    [35, 5, false], [8, 4, false], [16, 4, false], [22, 4, false],
+  ]);
+  assert.ok(!box24.some(r => r.n === 39), '39 只有 3 個策略，排在第 8 名之後不列入方塊');
   const res = rd('results.json').draws.find(d => d.issue === '115284' || d.date === '2026-11-24');
   assert.ok(res); assert.deepEqual([...res.numbers].sort((a, b) => a - b), draw24);
 
   const e25 = entries.find(x => x.drawDate === '2026-11-25');
   assert.ok(e25);
-  const r25 = A.repeatsOf(e25.picks);
-  assert.ok(r25.every(r => r.hit === undefined));
-  const by25 = Object.fromEntries(r25.map(r => [r.n, r.count]));
-  assert.equal(by25[22], 8);
-  assert.equal(by25[7], 7);
-  assert.equal(by25[25], 6);
-  assert.equal(by25[16], 5);
-  assert.equal(by25[38], 5);
-  assert.ok(r25[0].count >= 2 && r25.every((r, i) => i === 0 || r25[i - 1].count > r.count || (r25[i - 1].count === r.count && r25[i - 1].n < r.n)));
+  const box25 = A.repeatHighlights(e25.picks);
+  assert.equal(box25.length, 8);
+  assert.deepEqual(box25.map(r => [r.n, r.count]), [
+    [22, 8], [7, 7], [25, 6], [16, 5], [38, 5], [12, 4], [30, 4], [32, 4],
+  ]);
+  assert.ok(box25.every(r => r.hit === undefined && r.count >= 3));
 }
-console.log('repeat marks ok');
+console.log('repeat box ok');

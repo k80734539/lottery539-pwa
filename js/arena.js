@@ -191,18 +191,19 @@ export function pickCounts(picks = {}) {
   }
   return c;
 }
-/** 被 2 個以上策略選到的號碼，依次數高到低、同次數由小到大。draw 有給時標記 hit。 */
-export function repeatsOf(picks, draw = null) {
+/** 被 min 個以上策略選到的號碼，依次數高到低、同次數由小到大。draw 有給時標記 hit。 */
+export function repeatsOf(picks, draw = null, min = 2) {
   const counts = pickCounts(picks);
   const hit = draw ? new Set(draw) : null;
-  return Object.keys(counts).map(Number).filter(n => counts[n] >= 2)
+  return Object.keys(counts).map(Number).filter(n => counts[n] >= min)
     .sort((a, b) => counts[b] - counts[a] || a - b)
     .map(n => hit ? { n, count: counts[n], hit: hit.has(n) } : { n, count: counts[n] });
 }
-/** 球上的重複記號：開獎前 / 沒中是 'repeat'，重複又中是 'repeat-hit'，否則 ''。 */
-export function repeatMark(count, hit = false) {
-  if (!(count >= 2)) return '';
-  return hit ? 'repeat-hit' : 'repeat';
+export const REPEAT_MIN = 3;
+export const REPEAT_MAX = 8;
+/** 擂台「重複號」方塊要顯示的號碼：3 個以上策略選到，最多 8 顆。 */
+export function repeatHighlights(picks, draw = null) {
+  return repeatsOf(picks, draw, REPEAT_MIN).slice(0, REPEAT_MAX);
 }
 
 // ---------- 統計 ----------
