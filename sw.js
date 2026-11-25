@@ -1,4 +1,4 @@
-const VERSION = 'v15';
+const VERSION = 'v16';
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
 const FILES = ['./', 'index.html', 'css/style.css', 'js/app.js', 'js/logic.js', 'js/store.js', 'js/arena.js', 'js/lehe.js', 'js/chart.js', 'js/sync.js', 'js/original.js', 'js/suggest.js', 'js/track.js', 'manifest.webmanifest',

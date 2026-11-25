@@ -194,3 +194,34 @@ console.log('original strategies ok');
   assert.ok(box25.every(r => r.hit === undefined && r.count >= 3));
 }
 console.log('repeat box ok');
+
+// 今日重點＋命中率排序
+{
+  assert.equal(A.hitRatePct(0.85, 20), 21.25);
+  assert.equal(A.hitRatePct(0, 0), null);
+  const ranked = A.rankByHitRate([{ id: 'a', mean: 0.5, n: 10 }, { id: 'b', mean: 0.8, n: 10 }, { id: 'c', mean: 0.8, n: 20 }]);
+  assert.deepEqual(ranked.map(r => r.id), ['c', 'b', 'a']);
+
+  const entries = rd('arena_picks.json').entries;
+  const e25 = entries.find(x => x.drawDate === '2026-11-25');
+  const f25 = A.focusCard(e25.picks);
+  assert.deepEqual(f25.top.map(r => [r.n, r.count]), [[22, 8], [7, 7], [25, 6]]);
+  assert.deepEqual(f25.pair, [22, 7]);
+  assert.deepEqual(f25.trip, [22, 7, 25]);
+  assert.equal(f25.hits, null);
+  assert.equal(f25.pairHit, null);
+
+  const e24 = entries.find(x => x.drawDate === '2026-11-24');
+  const f24 = A.focusCard(e24.picks, [15, 19, 23, 24, 39]);
+  assert.deepEqual(f24.top.map(r => [r.n, r.count, r.hit]), [[30, 7, false], [28, 6, false], [7, 5, false]]);
+  assert.equal(f24.hits, 0);
+  assert.equal(f24.pairHit, false);
+  assert.equal(f24.tripHit, false);
+  const f24hit = A.focusCard({ a: [15, 19, 23, 1], b: [15, 19, 23, 2], c: [15, 19, 23, 3], d: [15, 4, 5, 6] }, [15, 19, 23, 24, 39]);
+  assert.deepEqual(f24hit.pair, [15, 19]);
+  assert.deepEqual(f24hit.trip, [15, 19, 23]);
+  assert.equal(f24hit.hits, 3);
+  assert.equal(f24hit.pairHit, true);
+  assert.equal(f24hit.tripHit, true);
+}
+console.log('today focus ok');

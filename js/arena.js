@@ -205,6 +205,30 @@ export const REPEAT_MAX = 8;
 export function repeatHighlights(picks, draw = null) {
   return repeatsOf(picks, draw, REPEAT_MIN).slice(0, REPEAT_MAX);
 }
+/** 命中率：平均命中顆數 ÷ 每期選 4 碼。沒有已開獎期數時回傳 null。 */
+export function hitRatePct(mean, n) {
+  if (!n) return null;
+  return mean / PICK_N * 100;
+}
+/** 依平均命中（即時排行主指標）由高到低。無資料者排最後。 */
+export function rankByHitRate(rows = []) {
+  return [...rows].sort((a, b) => (b.mean - a.mean) || (b.n - a.n) || String(a.id).localeCompare(String(b.id)));
+}
+/** 今日重點：選得最多的前 3 碼，以及用它們組成的二合、三合。 */
+export function focusCard(picks, draw = null) {
+  const top = repeatsOf(picks, draw, 1).slice(0, 3);
+  const pair = top.slice(0, 2).map(r => r.n);
+  const trip = top.slice(0, 3).map(r => r.n);
+  const hitSet = draw ? new Set(draw) : null;
+  return {
+    top,
+    pair,
+    trip,
+    hits: hitSet ? top.filter(r => r.hit).length : null,
+    pairHit: hitSet && pair.length === 2 ? pair.every(n => hitSet.has(n)) : null,
+    tripHit: hitSet && trip.length === 3 ? trip.every(n => hitSet.has(n)) : null,
+  };
+}
 
 // ---------- 統計 ----------
 function erfc(x) { // Numerical Recipes erfcc，相對誤差 < 1.2e-7

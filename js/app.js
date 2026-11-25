@@ -183,8 +183,38 @@ function balls(nums, opts = {}) {
   const hit = new Set(opts.hit || []), near = new Set(opts.near || []);
   return `<div class="balls">${nums.map(n => {
     const mark = T.ballMark(n, hit, near); // hit 優先於 near
-    return `<span class="ball${opts.small ? ' small' : ''}${opts.draw ? ' draw' : ''}${mark ? ' ' + mark : ''}">${String(n).padStart(2, '0')}</span>`;
+    return `<span class="ball${opts.big ? ' big' : ''}${opts.small ? ' small' : ''}${opts.draw ? ' draw' : ''}${mark ? ' ' + mark : ''}">${String(n).padStart(2, '0')}</span>`;
   }).join('')}</div>`;
+}
+function fmtHitPct(row) {
+  const p = row ? A.hitRatePct(row.mean, row.n) : null;
+  return p === null ? '—' : p.toFixed(1) + '%';
+}
+function rateById() {
+  const { dist } = arenaSettled();
+  const ev = A.evaluateAll(dist, 0);
+  return Object.fromEntries(ev.rows.map(r => [r.id, r]));
+}
+function strategiesByRate(ids, rates = null) {
+  rates = rates || rateById();
+  const rows = [...new Set(ids)].map(id => rates[id] || { id, mean: -1, n: -1 });
+  return A.rankByHitRate(rows).map(r => A.ARENA.find(s => s.id === r.id)).filter(Boolean);
+}
+function todayFocus(picks, drawNums) {
+  const f = A.focusCard(picks, drawNums || null);
+  if (!f.top.length) return '';
+  const drawn = !!drawNums;
+  const title = drawn ? `今天重點中 ${f.hits} 顆` : '今日重點';
+  const tops = f.top.map(r => `<div class="focus-item"><span class="ball big${r.hit ? ' hit' : ''}">${String(r.n).padStart(2, '0')}</span><span class="rep-n">${r.count} 個策略</span></div>`).join('');
+  const combo = (label, nums, ok) => {
+    if (nums.length < (label === '二合' ? 2 : 3)) return '';
+    const status = drawn ? (ok ? '<span class="tag ok">中</span>' : '<span class="tag">沒中</span>') : '';
+    return `<div class="focus-combo"><span class="sname">${label}</span>${balls(nums, { hit: drawn ? nums.filter(n => drawNums.includes(n)) : [] })}${status}</div>`;
+  };
+  return `<div class="card focus-card"><h2 style="margin:0 0 10px">${title}</h2>
+    <div class="focus-top">${tops}</div>
+    ${combo('二合', f.pair, f.pairHit)}
+    ${combo('三合', f.trip, f.tripHit)}</div>`;
 }
 function repeatBox(picks, drawNums) {
   const reps = A.repeatHighlights(picks, drawNums || null);
@@ -469,8 +499,8 @@ async function ensureArena() {
 function arenaSettled() { return A.settleEntries(S.state.arena.entries, drawMap); }
 function fmtP(p) { return p === null || p === undefined ? '—' : p < 0.001 ? '<0.001' : p.toFixed(3); }
 function arenaDistTable(ev, { showTheory = null, forward = false } = {}) {
-  const rows = [...ev.rows].sort((a, b) => b.mean - a.mean);
-  const body = rows.map(r => `<tr class="${r.id === 'random' ? 'base' : ''}${r.sig ? ' sig' : ''}"><td class="sname">${A.nameOf(r.id)}${r.better ? ' ⭐' : ''}</td><td>${r.mean.toFixed(3)}</td><td>${r.lo.toFixed(3)}~${r.hi.toFixed(3)}</td>${forward ? `<td>${r.n}</td>` : r.dist.map(c => `<td>${c}</td>`).join('')}<td>${r.adjMin === null ? '—' : r.z.toFixed(2)}</td><td>${fmtP(r.adjMin)}</td></tr>`).join('');
+  const rows = A.rankByHitRate(ev.rows);
+  const body = rows.map(r => `<tr class="${r.id === 'random' ? 'base' : ''}${r.sig ? ' sig' : ''}"><td class="sname">${A.nameOf(r.id)}${r.better ? ' ⭐' : ''} <span class="small-print">${fmtHitPct(r)}</span></td><td>${r.mean.toFixed(3)}</td><td>${r.lo.toFixed(3)}~${r.hi.toFixed(3)}</td>${forward ? `<td>${r.n}</td>` : r.dist.map(c => `<td>${c}</td>`).join('')}<td>${r.adjMin === null ? '—' : r.z.toFixed(2)}</td><td>${fmtP(r.adjMin)}</td></tr>`).join('');
   const head = `<tr><th>策略</th><th>平均命中</th><th>95%區間</th>${forward ? '<th>期數</th>' : '<th>0顆</th><th>1顆</th><th>2顆</th><th>3顆</th><th>4顆</th>'}<th>z</th><th>校正p</th></tr>`;
   const theory = showTheory ? `<tr class="base"><td><b>理論隨機</b></td><td>${A.MEAN4.toFixed(3)}</td><td>—</td>${forward ? '<td>—</td>' : A.P4.map(p => `<td>${(p * showTheory).toFixed(1)}</td>`).join('')}<td>0</td><td>—</td></tr>` : `<tr class="base"><td><b>理論隨機</b></td><td>${A.MEAN4.toFixed(3)}</td><td>—</td><td>—</td><td>0</td><td>—</td></tr>`;
   return `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body}${theory}</tbody></table></div>`;
@@ -502,28 +532,33 @@ function renderArena() {
     const date = L.nextDrawDate();
     const e = S.state.arena.entries.find(x => x.drawDate === date);
     const todayDraw = e && drawMap.get(date);
-    body = e ? `<div class="card"><div class="row between"><h2 style="margin:0">${fmtDate(date)} 的 ${A.ARENA.filter(s => e.picks[s.id]).length} 組</h2><span class="tag ok">已自動鎖定</span></div>
-      <div class="small-print">鎖定於 ${new Date(e.lockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間）・指紋 <code>${e.fp}</code>・使用到 ${e.histLast || '—'} 為止的 ${e.histCount} 期資料（只看過去）</div>
+    const rates = e ? rateById() : {};
+    const todayList = e ? strategiesByRate(Object.keys(e.picks)) : [];
+    const stratCards = todayList.map(s => `<div class="pickcard"><div class="row between"><span><span class="sname">${s.name}</span> <span class="tag">${fmtHitPct(rates[s.id])}</span> <span class="tag ${s.kind === 'baseline' ? '' : 'ok'}">${s.kind === 'baseline' ? '基準' : s.kind === 'original' ? '原版' : '新'}</span></span><button class="small" data-act="acopy" data-id="${s.id}">📋 複製</button></div>
+        <div class="small-print">${s.desc}</div>${balls(e.picks[s.id], { small: true, hit: todayDraw ? e.picks[s.id].filter(n => todayDraw.numbers.includes(n)) : [] })}</div>`).join('');
+    body = e ? `${todayFocus(e.picks, todayDraw && todayDraw.numbers)}
+      <div class="row between" style="margin:8px 0 4px"><span class="sname">${fmtDate(date)}</span><span class="tag ok">已自動鎖定</span></div>
+      <details class="card" id="arena-all-strats"><summary>展開看全部策略</summary>
+      <div class="small-print">鎖定於 ${new Date(e.lockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間）・指紋 <code>${e.fp}</code>・使用到 ${e.histLast || '—'} 為止的 ${e.histCount} 期資料（只看過去）・命中率＝平均命中 ÷ 4</div>
       ${e.origLockedAt ? `<div class="small-print">「你的策略」補上於 ${new Date(e.origLockedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台灣時間，仍在 20:30 前）・指紋 <code>${e.origFp}</code></div>` : ''}
       ${!A.origCounts(e) ? '<div class="small-print">這期紀錄建立時還沒有「你的策略」，且已過 20:30 無法補上，下一期開始才有。</div>' : ''}
-      ${repeatBox(e.picks, todayDraw && todayDraw.numbers)}
-      ${A.ARENA.filter(s => e.picks[s.id]).map(s => `${s.id === A.ORIG_IDS[0] ? '<h3 style="margin:14px 0 4px">你的策略（原版 Python 專案的 8 個每日策略，取排名1那組 4 碼）</h3>' : ''}<div class="pickcard"><div class="row between"><span><span class="sname">${s.name}</span> <span class="tag ${s.kind === 'baseline' ? '' : 'ok'}">${s.kind === 'baseline' ? '基準' : s.kind === 'original' ? '原版' : '新'}</span></span><button class="small" data-act="acopy" data-id="${s.id}">📋 複製</button></div>
-        <div class="small-print">${s.desc}</div>${balls(e.picks[s.id], { small: true, hit: todayDraw ? e.picks[s.id].filter(n => todayDraw.numbers.includes(n)) : [] })}</div>`).join('')}</div>` : '<div class="card muted">正在建立今天的選號…</div>';
+      ${stratCards}</details>` : '<div class="card muted">正在建立今天的選號…</div>';
     body += `<p class="small-print">每個策略的選號由「開獎日＋策略名」決定亂數種子，同一份歷史資料一定產生同一組，並在開獎日 20:30（台灣時間）前記錄鎖定。若某天沒打開 App，就沒有那天的即時紀錄（不會事後補，以免作弊）；歷史則由回測涵蓋。</p>`;
   } else if (arenaTab === 'live') {
     const { dist, settled } = arenaSettled();
     const ev = A.evaluateAll(dist, 30);
+    const rates = Object.fromEntries(A.evaluateAll(dist, 0).rows.map(r => [r.id, r]));
     const verdict = A.verdictText(ev);
     const pending = S.state.arena.entries.filter(e => A.entryCounts(e) && !drawMap.get(e.drawDate)).length;
     body = `<div class="card"><h2>即時排行（前向追蹤）</h2>
-      <div class="small-print">已累積 <b>${settled.length}</b> 期已開獎的紀錄${pending ? `，另有 ${pending} 期等待開獎` : ''}。排名只依平均命中排序，但樣本小時名次幾乎全是運氣；每個策略累積滿 30 期之前不做顯著性檢定。</div>
+      <div class="small-print">已累積 <b>${settled.length}</b> 期已開獎的紀錄${pending ? `，另有 ${pending} 期等待開獎` : ''}。排名依平均命中（命中率＝平均命中 ÷ 4）由高到低，但樣本小時名次幾乎全是運氣；每個策略累積滿 30 期之前不做顯著性檢定。</div>
       ${settled.length ? arenaDistTable(ev, { forward: true }) : '<div class="alert info">還沒有已開獎的即時紀錄。App 會自動在每個開獎日前記錄選號，開獎後自動結算，也可以到「開獎」頁手動輸入結果。</div>'}
       ${settled.length ? `<div class="alert ${verdict.kind === 'diff' ? 'warn' : 'info'}">${verdict.text}</div>` : ''}
       <div class="small-print">95% 區間為平均命中的信賴區間；校正 p 為 Holm 多重比較校正後的最小 p 值（z 檢定與卡方）。理論隨機基準 ${A.MEAN4.toFixed(4)} 若落在區間內，就看不出差異。</div></div>
       ${settled.length ? (() => { const c = liveCurve(settled); return arenaChart(c.dates, c.byId, hiddenLive, 'chart-live', `共 ${settled.length} 期即時紀錄。期數少時線會劇烈跳動，這是正常的運氣波動。`); })() : ''}
       ${settled.slice(0, 60).map((st, i) => `<details class="card"${i === 0 ? ' open' : ''}><summary><b>${fmtDate(st.date)}</b>${i === 0 ? '（最近一期）' : ''} <span class="small-print">最佳 ${Math.max(...Object.values(st.hits))} 顆</span></summary><div class="row" style="margin:6px 0"><span class="small-print">開獎</span>${balls(st.draw.numbers, { small: true, draw: true })}</div>
       ${repeatBox(st.picks, st.draw.numbers)}
-      ${A.ARENA.filter(s => st.hits[s.id] !== undefined).map(s => `<div class="pickcard"><div class="row between"><span class="sname">${s.name}</span><span class="tag ${st.hits[s.id] >= 2 ? 'ok' : ''}">中 ${st.hits[s.id]} 顆</span></div>${balls(st.picks[s.id], { small: true, hit: st.picks[s.id].filter(n => st.draw.numbers.includes(n)) })}</div>`).join('')}</details>`).join('')}`;
+      ${strategiesByRate(Object.keys(st.hits), rates).map(s => `<div class="pickcard"><div class="row between"><span><span class="sname">${s.name}</span> <span class="tag">${fmtHitPct(rates[s.id])}</span></span><span class="tag ${st.hits[s.id] >= 2 ? 'ok' : ''}">中 ${st.hits[s.id]} 顆</span></div>${balls(st.picks[s.id], { small: true, hit: st.picks[s.id].filter(n => st.draw.numbers.includes(n)) })}</div>`).join('')}</details>`).join('')}`;
   } else {
     if (!arenaBt) {
       body = `<div class="card"><h2>歷史回測（walk-forward）</h2><div class="small-print">對全部 ${drawChrono.length.toLocaleString()} 期歷史逐期往前走：每一期都只用「該期以前」的資料讓每個策略選 4 碼，再和該期實際開獎比。前 ${A.WARMUP} 期當暖身不計分。</div>
@@ -541,6 +576,11 @@ function renderArena() {
     }
   }
   view.innerHTML = `${NOTICE}${intro}${seg}${body}`;
+  const all = view.querySelector('#arena-all-strats');
+  if (all) {
+    try { all.open = localStorage.getItem('lottery539pwa:arenaAllOpen') === '1'; } catch {}
+    all.addEventListener('toggle', () => { try { localStorage.setItem('lottery539pwa:arenaAllOpen', all.open ? '1' : '0'); } catch {} });
+  }
 }
 function onArenaClick(e) {
   const seg = e.target.closest('[data-aseg]');
